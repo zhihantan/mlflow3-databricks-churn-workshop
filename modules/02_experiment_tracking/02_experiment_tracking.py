@@ -138,6 +138,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from mlflow.models import infer_signature
 
 pre = ColumnTransformer(
     transformers=[
@@ -152,12 +153,19 @@ with mlflow.start_run(run_name="logreg_baseline") as run_lr:
     test_auc = roc_auc_score(y_test, lr_pipe.predict_proba(X_test)[:, 1])
     mlflow.log_metric("test_auc", test_auc)
 
+    # Explicit signature — required for Unity Catalog model registration.
+    # MLflow 3's input_example-driven auto-inference is unreliable with mixed dtypes,
+    # so we always build the signature manually with infer_signature.
+    sig_input_lr = X_train.head(3)
+    signature_lr = infer_signature(sig_input_lr, lr_pipe.predict(sig_input_lr))
+
     # Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.sklearn.html
     # NOTE: `name=` is MLflow 3's replacement for `artifact_path=` from MLflow 2.x.
     lr_logged = mlflow.sklearn.log_model(
         sk_model=lr_pipe,
         name="logreg_baseline",
-        input_example=X_train.head(3),
+        input_example=sig_input_lr,
+        signature=signature_lr,
     )
 
 print(f"LR run_id      = {run_lr.info.run_id}")
@@ -204,11 +212,21 @@ with mlflow.start_run(run_name="lgbm_baseline") as run_lgb:
     test_auc_lgb = roc_auc_score(y_test, lgb_clf.predict_proba(X_test_lgb)[:, 1])
     mlflow.log_metric("test_auc", test_auc_lgb)
 
+    # Explicit signature — required for Unity Catalog model registration.
+    # Stringify the categorical columns for the signature/input_example so the
+    # logged contract is portable. LightGBM still recognizes the categorical
+    # labels at predict time because they were stored during training.
+    sig_input_lgb = X_train_lgb.head(3).copy()
+    for col in CATEGORICAL:
+        sig_input_lgb[col] = sig_input_lgb[col].astype(str)
+    signature_lgb = infer_signature(sig_input_lgb, lgb_clf.predict(X_train_lgb.head(3)))
+
     # Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.lightgbm.html
     lgb_logged = mlflow.lightgbm.log_model(
         lgb_model=lgb_clf,
         name="lgbm_baseline",
-        input_example=X_train_lgb.head(3),
+        input_example=sig_input_lgb,
+        signature=signature_lgb,
     )
 
 print(f"LGBM run_id    = {run_lgb.info.run_id}")

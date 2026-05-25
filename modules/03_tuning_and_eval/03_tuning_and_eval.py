@@ -170,6 +170,8 @@ print(f"Best params: {best_params}")
 
 # COMMAND ----------
 
+from mlflow.models import infer_signature
+
 with mlflow.start_run(run_name="lgbm_tuned") as run_tuned:
     mlflow.log_params(best_params)
     final_clf = lgb.LGBMClassifier(**best_params, objective="binary", random_state=42, verbosity=-1)
@@ -183,11 +185,20 @@ with mlflow.start_run(run_name="lgbm_tuned") as run_tuned:
     auc = roc_auc_score(y_test, final_clf.predict_proba(X_test)[:, 1])
     mlflow.log_metric("test_auc", auc)
 
+    # Explicit signature — required for Unity Catalog registration in Module 4.
+    # Stringify categoricals for the signature so the logged contract is portable;
+    # LightGBM still maps the strings back to its trained category labels.
+    sig_input = X_train.head(3).copy()
+    for col in CATEGORICAL:
+        sig_input[col] = sig_input[col].astype(str)
+    tuned_signature = infer_signature(sig_input, final_clf.predict(X_train.head(3)))
+
     # Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.lightgbm.html
     tuned_logged = mlflow.lightgbm.log_model(
         lgb_model=final_clf,
         name="lgbm_tuned",
-        input_example=X_train.head(3),
+        input_example=sig_input,
+        signature=tuned_signature,
     )
 
 print(f"Tuned model_id: {tuned_logged.model_id}")
