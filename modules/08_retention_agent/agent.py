@@ -23,6 +23,8 @@ Artifacts the driver notebook passes via `log_model(artifacts=...)`:
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import json
 import os
 from typing import Any
@@ -33,6 +35,25 @@ from mlflow.types.responses import (
     ResponsesAgentRequest,
     ResponsesAgentResponse,
 )
+
+
+def _run_agent_in_fresh_loop(agent, user_msg):
+    """Run an OpenAI Agents SDK ``Runner`` in a fresh thread + asyncio loop.
+
+    ``Runner.run_sync`` raises ``RuntimeError`` when invoked from inside an
+    already-running event loop, which is the default state in Databricks
+    notebooks (and any Jupyter/IPython kernel). Running the async ``Runner.run``
+    in a worker thread gives it its own loop and sidesteps the conflict.
+    Works identically in notebooks, deployed Model Serving endpoints, and
+    plain scripts.
+    """
+    from agents import Runner
+
+    def _target():
+        return asyncio.run(Runner.run(agent, user_msg))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(_target).result()
 
 
 class _AgentConfig:
@@ -145,7 +166,7 @@ class RetentionAgent(ResponsesAgent):
     def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
         user_msg = _extract_user_message(request)
 
-        from agents import Agent, Runner, function_tool
+        from agents import Agent, function_tool
 
         features_lookup = self.features_by_customer
 
@@ -194,7 +215,7 @@ class RetentionAgent(ResponsesAgent):
             model=_AgentConfig.chat_model,
         )
 
-        run_result = Runner.run_sync(agent, user_msg)
+        run_result = _run_agent_in_fresh_loop(agent, user_msg)
         text = str(run_result.final_output)
 
         return ResponsesAgentResponse(
