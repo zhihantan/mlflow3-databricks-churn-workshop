@@ -295,7 +295,16 @@ recent = mlflow.search_traces(
     order_by=["start_time DESC"],
 )
 if len(recent):
-    print(f"Most recent trace: {recent.iloc[0]['trace_id']} ({recent.iloc[0]['execution_time_ms']} ms)")
+    row = recent.iloc[0]
+    # `execution_time_ms` was renamed/removed in MLflow 3 minor versions — fall back
+    # to `execution_duration` (timedelta) when the legacy column isn't present.
+    if "execution_time_ms" in recent.columns:
+        latency_str = f"{row['execution_time_ms']} ms"
+    elif "execution_duration" in recent.columns and row["execution_duration"] is not None:
+        latency_str = f"{row['execution_duration'].total_seconds() * 1000:.0f} ms"
+    else:
+        latency_str = "latency unavailable"
+    print(f"Most recent trace: {row['trace_id']} ({latency_str})")
 
 # COMMAND ----------
 

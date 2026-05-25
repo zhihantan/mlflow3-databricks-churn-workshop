@@ -282,7 +282,11 @@ print(resp2.choices[0].message.content)
 _experiment_id = mlflow.get_experiment_by_name(EXPERIMENT_PATH).experiment_id
 recent_traces = mlflow.search_traces(locations=[_experiment_id], max_results=10)
 print(f"Recent traces in this experiment: {len(recent_traces)}")
-display(recent_traces[["trace_id", "request", "response", "execution_time_ms"]] if len(recent_traces) else recent_traces)
+# Display the full DataFrame — MLflow 3's returned columns have shifted across
+# minor versions (e.g. `execution_time_ms` → `execution_duration`), so projecting
+# a fixed column list is fragile. Databricks `display()` handles wide DataFrames
+# with horizontal scroll.
+display(recent_traces)
 
 # COMMAND ----------
 
