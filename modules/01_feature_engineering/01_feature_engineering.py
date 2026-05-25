@@ -184,7 +184,8 @@ feature_cols = [
     "support_ticket_count_30d", "negative_ticket_share_30d",
 ]
 features_df = features_df.select(*feature_cols)
-features_df.cache()
+# NOTE: `.cache()` is not supported on Serverless compute (PERSIST TABLE blocked).
+# The DataFrame is small (~20k rows) so re-computing on demand is cheap.
 
 print(f"Feature DataFrame: {features_df.count():,} rows × {len(feature_cols)} columns")
 display(features_df.limit(10))
@@ -291,13 +292,8 @@ display(training_df.limit(10))
 # COMMAND ----------
 
 TRAINING_TABLE = f"{FULL_SCHEMA}.churn_training_set"
-# `FeatureEngineeringClient.TrainingSet.load_df()` internally calls `.persist()`
-# to cache feature-lookup lineage metadata. Serverless compute blocks PERSIST TABLE
-# (`[NOT_SUPPORTED_WITH_SERVERLESS]`). We round-trip through pandas to detach from
-# the FE wrapper before the Delta write. Fine for the workshop's ~20k row scale.
-training_pdf = training_df.toPandas()
 (
-    spark.createDataFrame(training_pdf).write.mode("overwrite")
+    training_df.write.mode("overwrite")
     .option("overwriteSchema", "true")
     .saveAsTable(TRAINING_TABLE)
 )
