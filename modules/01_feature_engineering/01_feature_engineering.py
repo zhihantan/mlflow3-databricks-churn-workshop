@@ -291,12 +291,17 @@ display(training_df.limit(10))
 # COMMAND ----------
 
 TRAINING_TABLE = f"{FULL_SCHEMA}.churn_training_set"
+# `FeatureEngineeringClient.TrainingSet.load_df()` internally calls `.persist()`
+# to cache feature-lookup lineage metadata. Serverless compute blocks PERSIST TABLE
+# (`[NOT_SUPPORTED_WITH_SERVERLESS]`). We round-trip through pandas to detach from
+# the FE wrapper before the Delta write. Fine for the workshop's ~20k row scale.
+training_pdf = training_df.toPandas()
 (
-    training_df.write.mode("overwrite")
+    spark.createDataFrame(training_pdf).write.mode("overwrite")
     .option("overwriteSchema", "true")
     .saveAsTable(TRAINING_TABLE)
 )
-print(f"Materialized training set at {TRAINING_TABLE}")
+print(f"Materialized training set at {TRAINING_TABLE}: {spark.table(TRAINING_TABLE).count():,} rows")
 
 # COMMAND ----------
 
