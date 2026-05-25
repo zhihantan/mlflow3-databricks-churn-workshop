@@ -48,7 +48,8 @@ import time
 
 _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
 _nb_dir = os.path.dirname(_nb_path)
-_repo_root_rel = os.path.dirname(os.path.dirname(_nb_path))
+# modules/<module>/<notebook> → 3 dirnames to repo root
+_repo_root_rel = os.path.dirname(os.path.dirname(os.path.dirname(_nb_path)))
 _repo_root = _repo_root_rel if _repo_root_rel.startswith("/Workspace") else "/Workspace" + _repo_root_rel
 sys.path.append(_repo_root)
 
