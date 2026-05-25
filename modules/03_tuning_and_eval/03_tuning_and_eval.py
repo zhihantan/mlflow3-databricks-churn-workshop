@@ -259,15 +259,29 @@ expected_retention_value = make_metric(
 
 # COMMAND ----------
 
+import mlflow.models
+
+# Pre-compute predictions using the in-scope LightGBM classifier (with categorical
+# dtype intact, which is how it was trained). Then build eval_data with categorical
+# columns CAST TO STRINGS — MLflow's evaluator internally calls numpy operations
+# that raise TypeError on pandas CategoricalDtype. By pre-computing predictions and
+# passing them via `predictions=`, the evaluator never re-invokes the model, so the
+# stringified eval_data is only used for metric/plot computation (where numpy
+# compatibility matters).
+predictions = final_clf.predict(X_test)
+
 eval_data = X_test.copy()
+for col in CATEGORICAL:
+    eval_data[col] = eval_data[col].astype(str)
 eval_data["churned"] = y_test.values
+eval_data["predictions"] = predictions
 
 with mlflow.start_run(run_name="lgbm_tuned_evaluate"):
-    eval_results = mlflow.evaluate(
-        model=f"models:/{tuned_logged.model_id}",
+    eval_results = mlflow.models.evaluate(
         data=eval_data,
-        model_type="classifier",
         targets="churned",
+        predictions="predictions",        # pre-computed → no model call inside evaluate
+        model_type="classifier",
         extra_metrics=[expected_retention_value],
         model_id=tuned_logged.model_id,   # NEW in MLflow 3 — binds eval to LoggedModel
     )
