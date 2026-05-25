@@ -27,8 +27,8 @@
 # MAGIC %pip install --quiet \
 # MAGIC   "mlflow[databricks]>=3.12,<4" \
 # MAGIC   "openai>=1.50" \
-# MAGIC   "openai-agents>=0.1" \
-# MAGIC   "databricks-agents>=2.0" \
+# MAGIC   "openai-agents" \
+# MAGIC   "databricks-agents" \
 # MAGIC   "databricks-vectorsearch>=0.50" \
 # MAGIC   "databricks-sdk>=0.40"
 # MAGIC dbutils.library.restartPython()
@@ -167,7 +167,7 @@ with mlflow.start_run(run_name="retention_agent_log") as run:
         pip_requirements=[
             "mlflow[databricks]>=3.12,<4",
             "openai>=1.50",
-            "openai-agents>=0.1",
+            "openai-agents",
             "databricks-vectorsearch>=0.50",
             "databricks-sdk>=0.40",
         ],

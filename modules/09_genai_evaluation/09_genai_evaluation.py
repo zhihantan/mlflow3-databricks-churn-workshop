@@ -28,7 +28,7 @@
 # MAGIC %pip install --quiet \
 # MAGIC   "mlflow[databricks]>=3.12,<4" \
 # MAGIC   "openai>=1.50" \
-# MAGIC   "openai-agents>=0.1" \
+# MAGIC   "openai-agents" \
 # MAGIC   "databricks-vectorsearch>=0.50" \
 # MAGIC   "databricks-sdk>=0.40"
 # MAGIC dbutils.library.restartPython()

@@ -16,12 +16,12 @@ mlflow[databricks]>=3.12,<4
 databricks-sdk>=0.40
 databricks-feature-engineering>=0.14
 databricks-vectorsearch>=0.50
-databricks-agents>=2.0
+databricks-agents
 databricks-openai>=0.5
 databricks-lakehouse-monitoring
 
 # --- Agent inner-loop framework (locked Q1 = OpenAI Agents SDK) ---
-openai-agents>=0.1
+openai-agents
 openai>=1.50
 
 # --- Hyperparameter tuning ---
