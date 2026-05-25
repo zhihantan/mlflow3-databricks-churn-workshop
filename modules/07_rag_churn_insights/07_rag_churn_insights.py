@@ -285,26 +285,33 @@ for question in [
 
 # COMMAND ----------
 
-# Programmatic peek at the most recent trace.
-# `locations=` replaces the deprecated `experiment_ids=` in MLflow 3 — it expects
-# experiment IDs, not paths, so resolve via get_experiment_by_name() first.
-_experiment_id = mlflow.get_experiment_by_name(EXPERIMENT_PATH).experiment_id
-recent = mlflow.search_traces(
-    locations=[_experiment_id],
-    max_results=1,
-    order_by=["start_time DESC"],
-)
-if len(recent):
-    row = recent.iloc[0]
-    # `execution_time_ms` was renamed/removed in MLflow 3 minor versions — fall back
-    # to `execution_duration` (timedelta) when the legacy column isn't present.
-    if "execution_time_ms" in recent.columns:
-        latency_str = f"{row['execution_time_ms']} ms"
-    elif "execution_duration" in recent.columns and row["execution_duration"] is not None:
-        latency_str = f"{row['execution_duration'].total_seconds() * 1000:.0f} ms"
+# Programmatic peek at the most recent trace. This cell is purely informational —
+# the Traces UI tab is the canonical place to inspect traces. We wrap defensively
+# because `search_traces`'s return-shape and `order_by` field names have churned
+# across MLflow 3 minor versions.
+try:
+    _experiment_id = mlflow.get_experiment_by_name(EXPERIMENT_PATH).experiment_id
+    # Drop `order_by` — its accepted field names ("start_time" vs "timestamp_ms" vs
+    # "attributes.timestamp") vary by version. max_results=1 still returns one trace.
+    recent = mlflow.search_traces(locations=[_experiment_id], max_results=1)
+    if len(recent):
+        row = recent.iloc[0]
+        # Latency column name varies: `execution_time_ms` (legacy) vs
+        # `execution_duration` (timedelta) vs absent entirely.
+        if "execution_time_ms" in recent.columns:
+            latency_str = f"{row['execution_time_ms']} ms"
+        elif "execution_duration" in recent.columns and row["execution_duration"] is not None:
+            td = row["execution_duration"]
+            latency_str = (
+                f"{td.total_seconds() * 1000:.0f} ms" if hasattr(td, "total_seconds") else f"{td} ms"
+            )
+        else:
+            latency_str = "latency unavailable"
+        print(f"Most recent trace: {row['trace_id']} ({latency_str})")
     else:
-        latency_str = "latency unavailable"
-    print(f"Most recent trace: {row['trace_id']} ({latency_str})")
+        print("No traces found in this experiment yet.")
+except Exception as exc:
+    print(f"(trace peek skipped: {type(exc).__name__}: {exc}) — view traces in the UI instead")
 
 # COMMAND ----------
 
