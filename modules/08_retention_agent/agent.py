@@ -68,12 +68,39 @@ class _AgentConfig:
 def _configure_openai_for_databricks() -> None:
     """Point the OpenAI Agents SDK at the Databricks Foundation Model APIs.
 
-    Sets OPENAI_BASE_URL / OPENAI_API_KEY env vars from the Databricks workspace creds.
-    Both DBR notebook context (DATABRICKS_HOST/_TOKEN) and Model Serving's injected
-    env vars expose the same names.
+    Sets OPENAI_BASE_URL / OPENAI_API_KEY env vars so the underlying OpenAI client
+    (used internally by the OpenAI Agents SDK) reaches the Databricks FMAPI instead
+    of api.openai.com.
+
+    Auth-source priority:
+        1. Direct env vars: DATABRICKS_HOST / DATABRICKS_WORKSPACE_URL +
+           DATABRICKS_TOKEN / DATABRICKS_API_TOKEN. Driver notebooks set these
+           explicitly; Databricks Model Serving usually injects them when the
+           model is logged with `resources=[...]` declarations.
+        2. Fallback to the Databricks SDK's WorkspaceClient auto-detection. Covers
+           service-principal auth, workload identity, and any environment where
+           the direct env vars haven't been populated.
+
+    No-op if neither source yields creds (e.g., during a local-only test outside a
+    Databricks environment).
     """
-    host = os.environ.get("DATABRICKS_HOST") or os.environ.get("DATABRICKS_WORKSPACE_URL")
-    token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_TOKEN")
+    host = (
+        os.environ.get("DATABRICKS_HOST")
+        or os.environ.get("DATABRICKS_WORKSPACE_URL")
+    )
+    token = (
+        os.environ.get("DATABRICKS_TOKEN")
+        or os.environ.get("DATABRICKS_API_TOKEN")
+    )
+    if not (host and token):
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+            host = host or w.config.host
+            token = token or w.config.token
+        except Exception:
+            pass
+
     if host and token:
         os.environ["OPENAI_BASE_URL"] = f"{host.rstrip('/')}/serving-endpoints"
         os.environ["OPENAI_API_KEY"] = token
@@ -164,6 +191,11 @@ class RetentionAgent(ResponsesAgent):
         _configure_openai_for_databricks()
 
     def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
+        # Defensive: ensure OpenAI client env vars are populated even if load_context()
+        # was skipped (e.g. during MLflow's signature-inference predict at log_model time)
+        # or if a Model Serving worker re-uses the process across cold starts.
+        _configure_openai_for_databricks()
+
         user_msg = _extract_user_message(request)
 
         from agents import Agent, function_tool

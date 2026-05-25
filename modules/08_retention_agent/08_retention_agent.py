@@ -68,9 +68,24 @@ from config.workshop_config import (  # noqa: E402
     print_config,
 )
 
+# Set Databricks workspace credentials in env vars NOW, BEFORE we call log_model. The
+# log_model signature-inference path triggers a predict() against the input_example,
+# which in turn needs OPENAI_API_KEY (the OpenAI Agents SDK talks to FMAPI through
+# the standard OpenAI client). agent.py's _configure_openai_for_databricks() reads
+# DATABRICKS_HOST/_TOKEN and exports OPENAI_BASE_URL/_API_KEY — but only if those
+# DATABRICKS_* env vars are populated in this process first.
+_ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+os.environ["DATABRICKS_HOST"] = _ctx.apiUrl().get()
+os.environ["DATABRICKS_TOKEN"] = _ctx.apiToken().get()
+# Also export the OpenAI client env vars directly so the deployed endpoint inherits
+# them (and so any module-level openai client instantiation picks them up).
+os.environ["OPENAI_BASE_URL"] = f"{os.environ['DATABRICKS_HOST'].rstrip('/')}/serving-endpoints"
+os.environ["OPENAI_API_KEY"] = os.environ["DATABRICKS_TOKEN"]
+
 print_config()
 print(f"\nAgent module: {_agent_module_path}")
 print(f"Exists: {os.path.exists(_agent_module_path)}")
+print(f"OPENAI_BASE_URL: {os.environ['OPENAI_BASE_URL']}")
 
 # COMMAND ----------
 
@@ -222,11 +237,7 @@ print(f"\nProvisioning in background — we'll exercise the local copy while it 
 
 # COMMAND ----------
 
-# Make sure env vars the agent module reads are set in this process before loading.
-ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
-os.environ.setdefault("DATABRICKS_HOST", ctx.apiUrl().get())
-os.environ.setdefault("DATABRICKS_TOKEN", ctx.apiToken().get())
-
+# Env vars were already set in cell 2 (before log_model) — no setdefault needed here.
 local_agent = mlflow.pyfunc.load_model(f"models:/{logged.model_id}")
 
 # Pick a known-high-risk customer ID from our features lookup so the tools have data to find
