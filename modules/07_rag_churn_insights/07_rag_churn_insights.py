@@ -285,9 +285,10 @@ for question in [
 
 # COMMAND ----------
 
-# Programmatic peek at the most recent trace
+# Programmatic peek at the most recent trace.
+# `locations=` replaces the deprecated `experiment_ids=` in MLflow 3.
 recent = mlflow.search_traces(
-    experiment_ids=[mlflow.get_experiment_by_name(EXPERIMENT_PATH).experiment_id],
+    locations=[EXPERIMENT_PATH],
     max_results=1,
     order_by=["start_time DESC"],
 )

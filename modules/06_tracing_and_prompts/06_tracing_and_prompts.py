@@ -275,7 +275,10 @@ print(resp2.choices[0].message.content)
 # COMMAND ----------
 
 # Ref: https://mlflow.org/docs/latest/genai/tracing/
-recent_traces = mlflow.search_traces(experiment_ids=[mlflow.get_experiment_by_name(EXPERIMENT_PATH).experiment_id], max_results=10)
+# `locations=` replaces the deprecated `experiment_ids=` in MLflow 3 — it accepts
+# experiment paths or IDs. We pass the experiment path directly so we don't need
+# the extra get_experiment_by_name() round-trip.
+recent_traces = mlflow.search_traces(locations=[EXPERIMENT_PATH], max_results=10)
 print(f"Recent traces in this experiment: {len(recent_traces)}")
 display(recent_traces[["trace_id", "request", "response", "execution_time_ms"]] if len(recent_traces) else recent_traces)
 
