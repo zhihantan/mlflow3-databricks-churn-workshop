@@ -282,11 +282,12 @@ print(resp2.choices[0].message.content)
 _experiment_id = mlflow.get_experiment_by_name(EXPERIMENT_PATH).experiment_id
 recent_traces = mlflow.search_traces(locations=[_experiment_id], max_results=10)
 print(f"Recent traces in this experiment: {len(recent_traces)}")
-# Display the full DataFrame — MLflow 3's returned columns have shifted across
-# minor versions (e.g. `execution_time_ms` → `execution_duration`), so projecting
-# a fixed column list is fragile. Databricks `display()` handles wide DataFrames
-# with horizontal scroll.
-display(recent_traces)
+# The Traces tab in the MLflow experiment UI is the right place to inspect
+# request/response payloads — they contain nested dicts that don't round-trip
+# through Arrow, so a Databricks `display()` here would error. The count above
+# is enough to confirm tracing is wired up.
+if len(recent_traces):
+    print(f"Most recent trace_id: {recent_traces.iloc[0]['trace_id']}")
 
 # COMMAND ----------
 
