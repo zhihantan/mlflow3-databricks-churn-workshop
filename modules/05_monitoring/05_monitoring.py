@@ -1,33 +1,35 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Module 05 — Production Monitoring with Lakehouse Monitoring
+# MAGIC # Module 05 — Production Monitoring with MLflow + scipy
 # MAGIC
-# MAGIC In production, the model you deployed in Module 4 will eventually face data drift — payment behaviors shift, support-ticket volumes spike, new countries onboard. Lakehouse Monitoring continuously profiles your inference table and surfaces drift relative to a baseline, so you can decide when to retrain.
+# MAGIC In production, the model you deployed in Module 4 will eventually face data drift — payment behaviors shift, support-ticket volumes spike, new countries onboard. This module builds a **simulated** inference table with synthetic drift, then computes drift metrics with `scipy.stats` and tracks them as a time series in MLflow + a Delta `churn_drift_metrics` table.
+# MAGIC
+# MAGIC > **Note**: The original workshop used `databricks.lakehouse_monitoring` (legacy package, removed from PyPI) to auto-generate profile + drift tables. That capability now lives on the Databricks SDK as `WorkspaceClient.quality_monitors` and is the forward-looking path for full production monitoring. We compute the equivalent metrics manually here to keep the dependency footprint small and the math visible.
 # MAGIC
 # MAGIC **Learning objectives**
 # MAGIC
 # MAGIC By the end of this notebook you will:
 # MAGIC
 # MAGIC - Build a **simulated** inference table with two time windows where window 2 has a deliberately drifted `payment_failures_60d` distribution.
-# MAGIC - Create a Lakehouse Monitor with `InferenceLog` profile type pointing at that table.
-# MAGIC - See the schema of the auto-generated profile + drift metric tables, and run a sample drift query.
+# MAGIC - Compute per-feature drift metrics — Kolmogorov–Smirnov for numerics, chi-squared for categoricals — and a window-over-window mean shift.
+# MAGIC - Persist drift metrics to a queryable Delta table + log them to MLflow for time-series tracking.
+# MAGIC - Use `mlflow.evaluate(model_type="classifier")` per window to detect *prediction* drift (not just input drift) — model performance shift over time.
 # MAGIC
-# MAGIC **Why simulated and not real endpoint traffic?** The Module 4 endpoint only has whatever traffic our 3 sample predictions generated. Lakehouse Monitoring needs population over time to detect drift. Simulating gives a deterministic, didactically clean drift signal in seconds instead of needing participants to send hundreds of predictions.
+# MAGIC **Why simulated and not real endpoint traffic?** The Module 4 endpoint only has whatever traffic our 3 sample predictions generated. Drift detection needs population over time. Simulating gives a deterministic, didactically clean drift signal in seconds instead of needing participants to send hundreds of predictions.
 # MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
 # MAGIC - Modules 0, 1, 4 have been run.
 # MAGIC
-# MAGIC **Expected runtime**: ~3-4 minutes (monitor creation is the slow part; metric computation runs async and may not finish during the workshop — that's fine, the schema and the *setup pattern* are the lesson).
+# MAGIC **Expected runtime**: ~2-3 minutes (everything runs synchronously; no async monitor refresh to wait for).
 # MAGIC
-# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML. `scipy` is preinstalled on both.
 
 # COMMAND ----------
 
 # MAGIC %pip install --quiet \
 # MAGIC   "mlflow[databricks]>=3.12,<4" \
-# MAGIC   "databricks-sdk>=0.40" \
-# MAGIC   "databricks-lakehouse-monitoring"
+# MAGIC   "databricks-sdk>=0.40"
 # MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
@@ -137,97 +139,191 @@ display(spark.table(INFERENCE_TABLE).limit(5))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Create the Lakehouse Monitor
+# MAGIC ## 5. Compute per-feature drift metrics (window 2 vs window 1)
 # MAGIC
-# MAGIC We use the legacy `databricks.lakehouse_monitoring` API here — it's stable, well-documented, and ships on DBR ML LTS. The newer `WorkspaceClient.data_quality` SDK surface (see VERIFICATION.md) is the forward-looking path; switch when it stabilizes.
+# MAGIC For each feature we compute window-over-window drift relative to window 1 as the baseline:
+# MAGIC - **Numeric features** → two-sample Kolmogorov–Smirnov test. The KS statistic measures the maximum vertical distance between two ECDFs; the p-value tells us whether the distributions are statistically distinguishable.
+# MAGIC - **Categorical features** → chi-squared test on the contingency table of category counts.
 # MAGIC
-# MAGIC Ref: https://docs.databricks.com/aws/en/lakehouse-monitoring/create-monitor-api
+# MAGIC We also compute a plain mean-shift percentage for numerics — easier to read than a KS statistic for stakeholders.
 # MAGIC
-# MAGIC Key choices:
-# MAGIC - `profile_type=InferenceLog(...)` — profile_type telling the monitor this is ML inferences (not arbitrary time-series).
-# MAGIC - `problem_type="classification"` — the type of ML problem being monitored.
-# MAGIC - `prediction_col`, `label_col`, `timestamp_col`, `model_id_col` — required InferenceLog columns.
-# MAGIC - `granularities=["1 day"]` — daily aggregation. Workshop simulates 14 days, so we'll see 14 buckets.
-# MAGIC - `slicing_exprs=["country", "plan_tier"]` — additionally break out metrics by these dimensions.
+# MAGIC Ref: https://docs.scipy.org/doc/scipy/reference/stats.html
 
 # COMMAND ----------
 
-import databricks.lakehouse_monitoring as lm  # type: ignore
+import mlflow
+from scipy import stats
 
-# Drop any prior monitor for idempotency
-try:
-    lm.delete_monitor(table_name=INFERENCE_TABLE)
-    print(f"Deleted prior monitor on {INFERENCE_TABLE}")
-except Exception:
-    pass
+NUMERIC_FEATURES = ["payment_failures_60d", "pending_claims_90d"]
+CATEGORICAL_FEATURES = ["country", "plan_tier"]
+ALPHA = 0.05  # drift-detected threshold on p-value
 
-monitor_info = lm.create_monitor(
-    table_name=INFERENCE_TABLE,
-    profile_type=lm.InferenceLog(
-        problem_type="classification",
-        prediction_col="predicted_churn_label",
-        label_col="actual_churned",
-        timestamp_col="inference_ts",
-        granularities=["1 day"],
-        model_id_col="model_version",
-    ),
-    output_schema_name=FULL_SCHEMA,
-    slicing_exprs=["country", "plan_tier"],
+window_1 = inference_pdf[inference_pdf["inference_ts"] < pd.Timestamp(WINDOW_2_START)]
+window_2 = inference_pdf[inference_pdf["inference_ts"] >= pd.Timestamp(WINDOW_2_START)]
+print(f"Window 1 (baseline): {len(window_1):,} rows")
+print(f"Window 2 (drifted):  {len(window_2):,} rows\n")
+
+drift_rows: list[dict] = []
+
+for col in NUMERIC_FEATURES:
+    w1 = window_1[col].dropna().astype(float)
+    w2 = window_2[col].dropna().astype(float)
+    ks_stat, ks_p = stats.ks_2samp(w1, w2)
+    mean_shift_pct = (w2.mean() - w1.mean()) / w1.mean() * 100 if w1.mean() else 0.0
+    drift_rows.append({
+        "feature": col,
+        "feature_type": "numeric",
+        "w1_mean": float(w1.mean()),
+        "w1_std": float(w1.std()),
+        "w2_mean": float(w2.mean()),
+        "w2_std": float(w2.std()),
+        "mean_shift_pct": float(mean_shift_pct),
+        "test_statistic": float(ks_stat),
+        "p_value": float(ks_p),
+        "test_name": "ks_2samp",
+        "drift_detected": bool(ks_p < ALPHA),
+    })
+
+for col in CATEGORICAL_FEATURES:
+    all_categories = sorted(set(window_1[col].dropna()) | set(window_2[col].dropna()))
+    w1_freq = [int((window_1[col] == c).sum()) for c in all_categories]
+    w2_freq = [int((window_2[col] == c).sum()) for c in all_categories]
+    chi2_stat, chi2_p, _, _ = stats.chi2_contingency([w1_freq, w2_freq])
+    drift_rows.append({
+        "feature": col,
+        "feature_type": "categorical",
+        "w1_mean": None,
+        "w1_std": None,
+        "w2_mean": None,
+        "w2_std": None,
+        "mean_shift_pct": None,
+        "test_statistic": float(chi2_stat),
+        "p_value": float(chi2_p),
+        "test_name": "chi2_contingency",
+        "drift_detected": bool(chi2_p < ALPHA),
+    })
+
+drift_pdf = pd.DataFrame(drift_rows)
+print(drift_pdf.to_string(index=False))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 6. Persist drift metrics + log to MLflow
+# MAGIC
+# MAGIC Two destinations:
+# MAGIC - **Delta table** `<schema>.churn_drift_metrics` — queryable from SQL, dashboards, alerts. Re-runnable: each run overwrites the table.
+# MAGIC - **MLflow run** — logs the drift test statistics as metrics + tags so you can compare across model versions and across time. In a real production setup you'd schedule this notebook as a Job and the MLflow run history becomes your time series.
+
+# COMMAND ----------
+
+DRIFT_TABLE = f"{FULL_SCHEMA}.churn_drift_metrics"
+
+drift_sdf = spark.createDataFrame(drift_pdf)
+(
+    drift_sdf.write.mode("overwrite")
+    .option("overwriteSchema", "true")
+    .saveAsTable(DRIFT_TABLE)
 )
-print(f"Monitor created. Status: {monitor_info.status}")
-print(f"Profile metrics table: {monitor_info.profile_metrics_table_name}")
-print(f"Drift metrics table:   {monitor_info.drift_metrics_table_name}")
-print(f"Dashboard URL (once metrics compute): {monitor_info.dashboard_id}")
+print(f"Wrote {DRIFT_TABLE}: {spark.table(DRIFT_TABLE).count()} rows")
+
+with mlflow.start_run(run_name="churn_drift_window2_vs_window1") as drift_run:
+    mlflow.log_param("baseline_window", "window_1")
+    mlflow.log_param("comparison_window", "window_2")
+    mlflow.log_param("champion_version", champion_version)
+    mlflow.log_param("baseline_rows", len(window_1))
+    mlflow.log_param("comparison_rows", len(window_2))
+    mlflow.log_param("alpha", ALPHA)
+
+    for row in drift_rows:
+        feat = row["feature"]
+        mlflow.log_metric(f"drift_test_statistic__{feat}", row["test_statistic"])
+        mlflow.log_metric(f"drift_p_value__{feat}", row["p_value"])
+        mlflow.log_metric(f"drift_detected__{feat}", 1.0 if row["drift_detected"] else 0.0)
+        if row["mean_shift_pct"] is not None:
+            mlflow.log_metric(f"mean_shift_pct__{feat}", row["mean_shift_pct"])
+
+    drift_count = int(drift_pdf["drift_detected"].sum())
+    mlflow.log_metric("features_with_drift", drift_count)
+    mlflow.set_tag("drift_summary", f"{drift_count}/{len(drift_pdf)} features drifted at α={ALPHA}")
+
+print(f"\nMLflow run: {drift_run.info.run_id}")
+print(f"Features with drift detected: {drift_count}/{len(drift_pdf)}")
+display(spark.table(DRIFT_TABLE).orderBy(F.col("p_value").asc()))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Inspect the auto-generated metric tables
+# MAGIC ## 7. Prediction-level drift via `mlflow.evaluate()`
 # MAGIC
-# MAGIC The monitor creates two empty tables immediately; metric rows populate asynchronously after the first refresh (~5-15 min on a small table). For the workshop we just show the schemas — the *takeaway* is that you now have versioned, time-bucketed profile and drift metrics queryable as Delta tables, which means you can plug them into alerts, dashboards, Jobs, anywhere.
+# MAGIC Input drift is only half the story — what we really care about is whether *model performance* has shifted. We use `mlflow.evaluate(model_type="classifier")` once per window to compute classification metrics (accuracy, F1, log loss, AUC) on the predictions already in the inference table, then log them as MLflow metrics so window 1 vs window 2 are directly comparable in the MLflow UI.
+# MAGIC
+# MAGIC Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.html#mlflow.evaluate
 
 # COMMAND ----------
 
-profile_metrics_table = monitor_info.profile_metrics_table_name
-drift_metrics_table = monitor_info.drift_metrics_table_name
+per_window_metrics: list[dict] = []
 
-print(f"\n=== Profile metrics table schema: {profile_metrics_table} ===")
-spark.table(profile_metrics_table).printSchema()
+for window_label, window_df in [("window_1_baseline", window_1), ("window_2_drifted", window_2)]:
+    eval_df = window_df[["actual_churned", "predicted_churn_label"]].rename(
+        columns={"actual_churned": "target", "predicted_churn_label": "prediction"}
+    )
 
-print(f"\n=== Drift metrics table schema: {drift_metrics_table} ===")
-spark.table(drift_metrics_table).printSchema()
+    with mlflow.start_run(run_name=f"churn_eval_{window_label}") as eval_run:
+        mlflow.log_param("window", window_label)
+        mlflow.log_param("champion_version", champion_version)
+        mlflow.log_param("rows", len(eval_df))
+
+        result = mlflow.evaluate(
+            data=eval_df,
+            model_type="classifier",
+            targets="target",
+            predictions="prediction",
+        )
+        flat_metrics = {k: float(v) for k, v in result.metrics.items() if isinstance(v, (int, float))}
+        flat_metrics["window"] = window_label
+        flat_metrics["run_id"] = eval_run.info.run_id
+        per_window_metrics.append(flat_metrics)
+
+        print(f"\n{window_label}: run_id={eval_run.info.run_id}")
+        for k in ("accuracy_score", "f1_score", "log_loss", "roc_auc"):
+            if k in flat_metrics:
+                print(f"  {k:>20s}: {flat_metrics[k]:.4f}")
+
+# Show window-over-window delta so the drift in performance is obvious at a glance
+if len(per_window_metrics) == 2:
+    w1m, w2m = per_window_metrics[0], per_window_metrics[1]
+    print("\nWindow-over-window deltas:")
+    for k in sorted(set(w1m) & set(w2m)):
+        if isinstance(w1m[k], float) and k not in ("run_id",):
+            delta = w2m[k] - w1m[k]
+            print(f"  Δ {k:>22s}: {delta:+.4f}")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 7. Trigger an initial refresh
+# MAGIC ## 8. Drift query against the persisted Delta table
 # MAGIC
-# MAGIC `lm.run_refresh(...)` kicks off metric computation. We submit it but don't wait — refresh takes longer than the workshop budget. The instructor can show populated metrics from a pre-run setup, or participants can come back to this notebook later.
+# MAGIC Same idea as the Lakehouse-Monitor output — but on a Delta table you wrote yourself. Plug this into a Databricks SQL alert (or a Job that emails when `features_with_drift > 0`) for production-grade retraining triggers.
 
 # COMMAND ----------
 
-refresh_info = lm.run_refresh(table_name=INFERENCE_TABLE)
-print(f"Refresh submitted: refresh_id={refresh_info.refresh_id}, state={refresh_info.state}")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 8. Example drift query (works once metrics populate)
-# MAGIC
-# MAGIC The query below would surface the drift on `payment_failures_60d` once the monitor refresh completes. For now it will return empty — wait ~10 min after the refresh and re-run, or share an instructor-prepared screenshot.
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC -- Show drift on payment_failures_60d window-over-window.
-# MAGIC -- The monitor populates ${full_schema}.churn_inferences_sim_drift_metrics (or similar)
-# MAGIC -- after the first refresh. Replace the table name with `monitor_info.drift_metrics_table_name`
-# MAGIC -- (printed above) if the auto-construction below doesn't match your workspace.
-# MAGIC SELECT 1 AS placeholder
-# MAGIC -- SELECT window, column_name, drift_type, js_distance, wasserstein_distance
-# MAGIC -- FROM ${monitor_info.drift_metrics_table_name}
-# MAGIC -- WHERE column_name IN ('payment_failures_60d', 'pending_claims_90d', 'predicted_churn_label')
-# MAGIC -- ORDER BY window DESC
+# Features ranked by statistical significance of drift (lowest p-value first).
+# Plug this query into a Databricks SQL Alert against the same table to email/Slack
+# when any feature breaches your significance threshold.
+display(
+    spark.sql(f"""
+        SELECT
+            feature,
+            feature_type,
+            ROUND(test_statistic, 4)  AS test_statistic,
+            ROUND(p_value, 6)         AS p_value,
+            ROUND(mean_shift_pct, 2)  AS mean_shift_pct,
+            drift_detected
+        FROM {DRIFT_TABLE}
+        ORDER BY p_value ASC
+    """)
+)
 
 # COMMAND ----------
 
@@ -236,16 +332,19 @@ print(f"Refresh submitted: refresh_id={refresh_info.refresh_id}, state={refresh_
 # MAGIC
 # MAGIC **What you just learned**
 # MAGIC
-# MAGIC - The shape of a Lakehouse Monitoring inference table: predictions, labels, timestamps, model_id, and the original features.
-# MAGIC - `lm.create_monitor(profile_type=InferenceLog(...))` for ML inference monitoring with classification problem type.
-# MAGIC - The monitor auto-generates two Delta tables — profile metrics + drift metrics — plus a dashboard. You can query them like any other Delta table.
-# MAGIC - Slicing via `slicing_exprs` gives you "drift by country" / "drift by plan tier" out of the box.
+# MAGIC - The shape of an inference table: predictions, labels, timestamps, model_id, original features.
+# MAGIC - Two complementary drift checks:
+# MAGIC   - **Input drift** — Kolmogorov–Smirnov for numerics, chi-squared for categoricals, computed with `scipy.stats`.
+# MAGIC   - **Prediction drift / performance shift** — `mlflow.evaluate(model_type="classifier")` per window.
+# MAGIC - Persisting drift as a Delta table makes it queryable from SQL and pluggable into Databricks SQL alerts; logging to MLflow gives you a per-run history you can chart in the MLflow UI.
+# MAGIC - For full production-grade monitoring (auto-generated dashboards, slicing, async refresh) the forward-looking path is `WorkspaceClient.quality_monitors` on the Databricks SDK. The math you saw here is exactly what that service computes under the hood.
 # MAGIC
 # MAGIC **What's next — Module 6: Tracing & Prompt Registry**
 # MAGIC
 # MAGIC Module 6 opens the **GenAI half of the workshop**. We'll make a call against the Foundation Model APIs with MLflow Tracing on, register a prompt template in the Prompt Registry, and start the Vector Search endpoint provisioning that Module 7 will use. Open `modules/06_tracing_and_prompts/06_tracing_and_prompts.py`.
 # MAGIC
 # MAGIC **Go deeper**
-# MAGIC - [Lakehouse Monitoring overview](https://docs.databricks.com/aws/en/lakehouse-monitoring/)
-# MAGIC - [Create a monitor via API](https://docs.databricks.com/aws/en/lakehouse-monitoring/create-monitor-api)
-# MAGIC - [Monitor output tables](https://docs.databricks.com/aws/en/lakehouse-monitoring/monitor-output)
+# MAGIC - [scipy.stats.ks_2samp](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ks_2samp.html)
+# MAGIC - [scipy.stats.chi2_contingency](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.chi2_contingency.html)
+# MAGIC - [mlflow.evaluate](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.html#mlflow.evaluate)
+# MAGIC - [Databricks Lakehouse Monitoring (forward-looking SDK path)](https://docs.databricks.com/aws/en/lakehouse-monitoring/)
