@@ -1,0 +1,34 @@
+# Pinned versions for the MLflow 3 + Databricks Churn Workshop.
+#
+# DBR 17.3 LTS ML ships MLflow 3.0.1, sklearn 1.6.1, LightGBM 4.6.0, XGBoost 3.0.0,
+# Optuna 3.6.1, and databricks-feature-engineering 0.12.1. We pin to newer floors
+# below because Module 6+ require the current mlflow.genai surface
+# (predefined scorers, ResponsesAgent, prompt registry aliases) which only landed
+# in MLflow 3.10+.
+#
+# This file is informational; notebooks `%pip install` what they need at the top
+# of each module so the workshop also runs on Serverless ML (Beta).
+
+# --- MLflow 3 (Databricks extras include the genai surface) ---
+mlflow[databricks]>=3.12,<4
+
+# --- Databricks platform clients ---
+databricks-sdk>=0.40
+databricks-feature-engineering>=0.14
+databricks-vectorsearch>=0.50
+databricks-agents>=2.0
+databricks-openai>=0.5
+databricks-lakehouse-monitoring
+
+# --- Agent inner-loop framework (locked Q1 = OpenAI Agents SDK) ---
+openai-agents>=0.1
+openai>=1.50
+
+# --- Hyperparameter tuning ---
+optuna>=3.6
+
+# --- ML libs (preinstalled on DBR ML LTS; listed for documentation + Serverless ML) ---
+lightgbm>=4.6
+scikit-learn>=1.6
+pandas>=2.0
+numpy>=1.26

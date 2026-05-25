@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Databricks
+.databricks/
+*.dbrepo
+.databricks-deploy/
+
+# MLflow local artifacts
+mlruns/
+mlartifacts/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Environment
+.env
+.venv/
+venv/
+
+# Build outputs
+build/
+dist/

@@ -1,0 +1,205 @@
+"""Retention Outreach Agent — ResponsesAgent subclass (Models-from-Code entry point).
+
+Logged via `mlflow.pyfunc.log_model(python_model="agent.py", ...)` from the driver
+notebook `08_retention_agent.py`. The `mlflow.models.set_model(...)` call at the bottom
+designates `RetentionAgent` as the model object MLflow loads at inference time.
+
+Architecture
+------------
+- Inherits `mlflow.pyfunc.ResponsesAgent` (canonical 2026 Databricks agent flavor).
+- Uses **OpenAI Agents SDK** (`from agents import Agent, Runner, function_tool`) for the
+  inner tool-loop (per Q1 of PLAN.md).
+- Exposes two tools that wire back to earlier workshop modules:
+    1. `churn_score_tool(customer_id)` — POSTs to the Module 4 churn endpoint.
+    2. `tickets_tool(customer_id, query)` — calls the Module 7 Vector Search index,
+       filtered by customer.
+- Customer features + endpoint/index identifiers are passed in via JSON **artifacts**
+  (not env vars) so the agent works identically locally and on Model Serving.
+
+Artifacts the driver notebook passes via `log_model(artifacts=...)`:
+- `customer_features` — JSON mapping `customer_id → features dict`
+- `agent_config` — JSON with `CHURN_ENDPOINT`, `VS_ENDPOINT`, `VS_INDEX`, `CHAT_MODEL`
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from typing import Any
+
+import mlflow
+from mlflow.pyfunc import ResponsesAgent
+from mlflow.types.responses import (
+    ResponsesAgentRequest,
+    ResponsesAgentResponse,
+)
+
+
+class _AgentConfig:
+    """Mutable container populated in `RetentionAgent.load_context`."""
+
+    churn_endpoint: str = ""
+    vs_endpoint: str = ""
+    vs_index: str = ""
+    chat_model: str = "databricks-claude-haiku-4-5"
+
+
+def _configure_openai_for_databricks() -> None:
+    """Point the OpenAI Agents SDK at the Databricks Foundation Model APIs.
+
+    Sets OPENAI_BASE_URL / OPENAI_API_KEY env vars from the Databricks workspace creds.
+    Both DBR notebook context (DATABRICKS_HOST/_TOKEN) and Model Serving's injected
+    env vars expose the same names.
+    """
+    host = os.environ.get("DATABRICKS_HOST") or os.environ.get("DATABRICKS_WORKSPACE_URL")
+    token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_TOKEN")
+    if host and token:
+        os.environ["OPENAI_BASE_URL"] = f"{host.rstrip('/')}/serving-endpoints"
+        os.environ["OPENAI_API_KEY"] = token
+
+
+def _call_churn_endpoint(features: dict[str, Any]) -> float:
+    """POST to the Module 4 churn endpoint via the MLflow Deployments client."""
+    import mlflow.deployments
+
+    client = mlflow.deployments.get_deploy_client("databricks")
+    payload = {
+        "dataframe_split": {
+            "columns": list(features.keys()),
+            "data": [list(features.values())],
+        }
+    }
+    result = client.predict(endpoint=_AgentConfig.churn_endpoint, inputs=payload)
+    preds = result.get("predictions", [])
+    if not preds:
+        return 0.0
+    return float(preds[0])
+
+
+def _query_vector_search(customer_id: str, query: str, k: int = 5) -> list[dict]:
+    """Filter the VS index by customer_id and return the top-k support tickets."""
+    from databricks.vector_search.client import VectorSearchClient
+
+    vsc = VectorSearchClient(disable_notice=True)
+    idx = vsc.get_index(endpoint_name=_AgentConfig.vs_endpoint, index_name=_AgentConfig.vs_index)
+    results = idx.similarity_search(
+        query_text=query,
+        columns=["ticket_id", "customer_id", "category", "sentiment", "description"],
+        num_results=k,
+        filters={"customer_id": customer_id},
+    )
+    rows = results.get("result", {}).get("data_array", [])
+    if not rows:
+        return []
+    cols = [c["name"] for c in results["manifest"]["columns"]]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+def _extract_user_message(request: ResponsesAgentRequest) -> str:
+    """Pull the most recent user message text from the Responses API input list."""
+    for item in request.input:
+        if isinstance(item, dict):
+            item_dict = item
+        elif hasattr(item, "model_dump"):
+            item_dict = item.model_dump()
+        else:
+            continue
+        if item_dict.get("role") != "user":
+            continue
+        content = item_dict.get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                p.get("text", "") for p in content
+                if isinstance(p, dict) and p.get("type") in ("input_text", "text")
+            )
+    return ""
+
+
+class RetentionAgent(ResponsesAgent):
+    """Drafts a personalized retention email for a single bolttech customer."""
+
+    def load_context(self, context):  # noqa: D401
+        """Load the customer-features lookup + agent config artifacts, configure OpenAI."""
+        # Customer features lookup
+        features_artifact = context.artifacts.get("customer_features")
+        if features_artifact and os.path.exists(features_artifact):
+            with open(features_artifact) as fh:
+                self.features_by_customer = json.load(fh)
+        else:
+            self.features_by_customer = {}
+
+        # Agent config (endpoint/index names + chat model)
+        config_artifact = context.artifacts.get("agent_config")
+        if config_artifact and os.path.exists(config_artifact):
+            with open(config_artifact) as fh:
+                cfg = json.load(fh)
+            _AgentConfig.churn_endpoint = cfg.get("CHURN_ENDPOINT", _AgentConfig.churn_endpoint)
+            _AgentConfig.vs_endpoint = cfg.get("VS_ENDPOINT", _AgentConfig.vs_endpoint)
+            _AgentConfig.vs_index = cfg.get("VS_INDEX", _AgentConfig.vs_index)
+            _AgentConfig.chat_model = cfg.get("CHAT_MODEL", _AgentConfig.chat_model)
+
+        _configure_openai_for_databricks()
+
+    def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
+        user_msg = _extract_user_message(request)
+
+        from agents import Agent, Runner, function_tool
+
+        features_lookup = self.features_by_customer
+
+        @function_tool
+        def churn_score_tool(customer_id: str) -> str:
+            """Return the churn risk score for the given customer ID."""
+            features = features_lookup.get(customer_id)
+            if not features:
+                return f"No features available for customer {customer_id}."
+            score = _call_churn_endpoint(features)
+            return f"customer_id={customer_id} churn_score={score:.3f}"
+
+        @function_tool
+        def tickets_tool(customer_id: str, query: str = "churn cancel payment problem") -> str:
+            """Retrieve the most relevant support tickets for the given customer."""
+            tickets = _query_vector_search(customer_id, query)
+            if not tickets:
+                return f"No tickets found for customer {customer_id}."
+            return json.dumps(
+                [
+                    {
+                        "ticket_id": t["ticket_id"],
+                        "category": t["category"],
+                        "sentiment": t["sentiment"],
+                        "description": t["description"][:300],
+                    }
+                    for t in tickets
+                ]
+            )
+
+        agent = Agent(
+            name="bolttech_retention",
+            instructions=(
+                "You are a customer-retention specialist at bolttech, a global insurtech.\n"
+                "Given a customer ID, draft a short, personalized retention email. Your process:\n"
+                "1. Call churn_score_tool with the customer ID to learn the risk.\n"
+                "2. Call tickets_tool with the customer ID to retrieve their recent support tickets.\n"
+                "3. Write a warm, professional retention email (<= 150 words) that:\n"
+                "   - Acknowledges the specific issues you found in their tickets.\n"
+                "   - Offers a concrete next step (e.g. a callback from CS, escalation, plan review).\n"
+                "   - Mentions their plan tier if available in the tickets.\n"
+                "   - Never promises a discount or refund amount.\n"
+                "Use a tone that is empathetic but not overly casual. End with a clear sign-off."
+            ),
+            tools=[churn_score_tool, tickets_tool],
+            model=_AgentConfig.chat_model,
+        )
+
+        run_result = Runner.run_sync(agent, user_msg)
+        text = str(run_result.final_output)
+
+        return ResponsesAgentResponse(
+            output=[self.create_text_output_item(text=text, id="msg_001")],
+        )
+
+
+mlflow.models.set_model(RetentionAgent())
