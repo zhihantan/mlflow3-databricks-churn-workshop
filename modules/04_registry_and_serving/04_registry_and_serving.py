@@ -153,7 +153,13 @@ served_entity = ServedEntityInput(
     workload_size="Small",
     scale_to_zero_enabled=True,
 )
-config = EndpointCoreConfigInput(served_entities=[served_entity])
+# `name=` is required on EndpointCoreConfigInput in databricks-sdk >=0.40; some
+# older SDK versions made it optional. We pass it defensively so the config carries
+# the endpoint name even though the create() call below also takes it as a kwarg.
+config = EndpointCoreConfigInput(
+    name=CHURN_ENDPOINT,
+    served_entities=[served_entity],
+)
 
 # Check if endpoint already exists
 existing = None
