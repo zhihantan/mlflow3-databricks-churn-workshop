@@ -81,8 +81,9 @@ TARGET = "churned"
 
 X = df[CATEGORICAL + NUMERIC].copy()
 y = df[TARGET].astype(int)
+# Normalize categoricals to object/string dtype to match the LR/LGBM pipelines from Module 2.
 for col in CATEGORICAL:
-    X[col] = X[col].astype("category")
+    X[col] = X[col].astype(str)
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 print(f"Train: {len(X_train):,} | Test: {len(X_test):,} | Churn rate: {y_train.mean():.1%}")
@@ -107,10 +108,25 @@ print(f"Baseline LGBM model_id (from Module 2): {baseline_model_id}")
 
 import lightgbm as lgb
 import optuna
+from sklearn.compose import ColumnTransformer
 from sklearn.metrics import roc_auc_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
 
 # Suppress Optuna's per-trial logging — MLflow runs are the source of truth.
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+
+def _make_lgb_pipeline(params: dict) -> Pipeline:
+    """OneHotEncoder + LightGBM Pipeline — mirrors Module 2's LGBM pipeline shape
+    so signatures, predict, and serving stay uniform across modules."""
+    return Pipeline([
+        ("pre", ColumnTransformer([
+            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), CATEGORICAL),
+            ("num", "passthrough", NUMERIC),
+        ])),
+        ("clf", lgb.LGBMClassifier(**params, objective="binary", random_state=42, verbosity=-1)),
+    ])
 
 
 def objective(trial: optuna.Trial) -> float:
@@ -125,20 +141,9 @@ def objective(trial: optuna.Trial) -> float:
     }
     with mlflow.start_run(nested=True, run_name=f"trial_{trial.number}"):
         mlflow.log_params(params)
-        clf = lgb.LGBMClassifier(
-            **params,
-            objective="binary",
-            random_state=42,
-            verbosity=-1,
-        )
-        clf.fit(
-            X_train,
-            y_train,
-            eval_set=[(X_test, y_test)],
-            categorical_feature=CATEGORICAL,
-            callbacks=[lgb.early_stopping(20, verbose=False)],
-        )
-        auc = roc_auc_score(y_test, clf.predict_proba(X_test)[:, 1])
+        pipe = _make_lgb_pipeline(params)
+        pipe.fit(X_train, y_train)
+        auc = roc_auc_score(y_test, pipe.predict_proba(X_test)[:, 1])
         mlflow.log_metric("test_auc", auc)
     return auc
 
@@ -174,28 +179,19 @@ from mlflow.models import infer_signature
 
 with mlflow.start_run(run_name="lgbm_tuned") as run_tuned:
     mlflow.log_params(best_params)
-    final_clf = lgb.LGBMClassifier(**best_params, objective="binary", random_state=42, verbosity=-1)
-    final_clf.fit(
-        X_train,
-        y_train,
-        eval_set=[(X_test, y_test)],
-        categorical_feature=CATEGORICAL,
-        callbacks=[lgb.early_stopping(20, verbose=False)],
-    )
-    auc = roc_auc_score(y_test, final_clf.predict_proba(X_test)[:, 1])
+    final_pipe = _make_lgb_pipeline(best_params)
+    final_pipe.fit(X_train, y_train)
+    auc = roc_auc_score(y_test, final_pipe.predict_proba(X_test)[:, 1])
     mlflow.log_metric("test_auc", auc)
 
     # Explicit signature — required for Unity Catalog registration in Module 4.
-    # Stringify categoricals for the signature so the logged contract is portable;
-    # LightGBM still maps the strings back to its trained category labels.
-    sig_input = X_train.head(3).copy()
-    for col in CATEGORICAL:
-        sig_input[col] = sig_input[col].astype(str)
-    tuned_signature = infer_signature(sig_input, final_clf.predict(X_train.head(3)))
+    sig_input = X_train.head(3)
+    tuned_signature = infer_signature(sig_input, final_pipe.predict(sig_input))
 
-    # Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.lightgbm.html
-    tuned_logged = mlflow.lightgbm.log_model(
-        lgb_model=final_clf,
+    # Pipeline is a sklearn estimator → use the sklearn flavor for logging.
+    # Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.sklearn.html
+    tuned_logged = mlflow.sklearn.log_model(
+        sk_model=final_pipe,
         name="lgbm_tuned",
         input_example=sig_input,
         signature=tuned_signature,
@@ -272,27 +268,19 @@ expected_retention_value = make_metric(
 
 import mlflow.models
 
-# Pre-compute predictions using the in-scope LightGBM classifier (with categorical
-# dtype intact, which is how it was trained). Then build eval_data with categorical
-# columns CAST TO STRINGS — MLflow's evaluator internally calls numpy operations
-# that raise TypeError on pandas CategoricalDtype. By pre-computing predictions and
-# passing them via `predictions=`, the evaluator never re-invokes the model, so the
-# stringified eval_data is only used for metric/plot computation (where numpy
-# compatibility matters).
-predictions = final_clf.predict(X_test)
-
+# With the Pipeline approach, X_test has plain object/numeric dtypes — no Categorical
+# columns to confuse the evaluator. We can pass `model=` directly and let MLflow
+# auto-compute the full classification metric suite (ROC-AUC, log-loss, etc.) via
+# predict_proba.
 eval_data = X_test.copy()
-for col in CATEGORICAL:
-    eval_data[col] = eval_data[col].astype(str)
 eval_data["churned"] = y_test.values
-eval_data["predictions"] = predictions
 
 with mlflow.start_run(run_name="lgbm_tuned_evaluate"):
     eval_results = mlflow.models.evaluate(
+        model=f"models:/{tuned_logged.model_id}",
         data=eval_data,
-        targets="churned",
-        predictions="predictions",        # pre-computed → no model call inside evaluate
         model_type="classifier",
+        targets="churned",
         extra_metrics=[expected_retention_value],
         model_id=tuned_logged.model_id,   # NEW in MLflow 3 — binds eval to LoggedModel
     )
@@ -310,22 +298,16 @@ for name, value in sorted(eval_results.metrics.items()):
 
 # COMMAND ----------
 
-# pyfunc gives class predictions; load via the flavor-specific loader for predict_proba.
-baseline_pyfunc = mlflow.pyfunc.load_model(f"models:/{baseline_model_id}")
-tuned_pyfunc = mlflow.pyfunc.load_model(f"models:/{tuned_logged.model_id}")
-baseline_lgb_native = mlflow.lightgbm.load_model(f"models:/{baseline_model_id}")
-tuned_lgb_native = mlflow.lightgbm.load_model(f"models:/{tuned_logged.model_id}")
+# Both models are now sklearn Pipelines logged via mlflow.sklearn — load them via the
+# sklearn flavor to get back the full Pipeline object (so we can call .predict_proba()
+# for ROC-AUC and not just .predict() for class labels).
+baseline_pipe = mlflow.sklearn.load_model(f"models:/{baseline_model_id}")
+tuned_pipe = mlflow.sklearn.load_model(f"models:/{tuned_logged.model_id}")
 
-# pyfunc schema enforcement requires plain-string categoricals (matching the
-# logged signature); the native LightGBM loader accepts Categorical dtype directly.
-X_test_str = X_test.copy()
-for col in CATEGORICAL:
-    X_test_str[col] = X_test_str[col].astype(str)
-
-baseline_preds = baseline_pyfunc.predict(X_test_str)
-tuned_preds = tuned_pyfunc.predict(X_test_str)
-baseline_proba = baseline_lgb_native.predict_proba(X_test)[:, 1]
-tuned_proba = tuned_lgb_native.predict_proba(X_test)[:, 1]
+baseline_preds = baseline_pipe.predict(X_test)
+tuned_preds = tuned_pipe.predict(X_test)
+baseline_proba = baseline_pipe.predict_proba(X_test)[:, 1]
+tuned_proba = tuned_pipe.predict_proba(X_test)[:, 1]
 
 baseline_auc = roc_auc_score(y_test, baseline_proba)
 tuned_auc = roc_auc_score(y_test, tuned_proba)

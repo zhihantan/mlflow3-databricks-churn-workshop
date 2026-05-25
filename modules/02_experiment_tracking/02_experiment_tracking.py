@@ -106,8 +106,13 @@ NUMERIC = [
 ]
 TARGET = "churned"
 
-X = df[CATEGORICAL + NUMERIC]
+X = df[CATEGORICAL + NUMERIC].copy()
 y = df[TARGET].astype(int)
+# Normalize categorical columns to plain object/string dtype so both the LR and the
+# LGBM pipelines see the same input contract (no pandas Categorical dtype anywhere).
+for col in CATEGORICAL:
+    X[col] = X[col].astype(str)
+
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 print(f"Train: {len(X_train):,} rows | Test: {len(X_test):,} rows | Churn rate (train): {y_train.mean():.1%}")
 
@@ -178,22 +183,30 @@ print(f"LR test_auc    = {test_auc:.4f}")
 # MAGIC %md
 # MAGIC ## 7. Train the LightGBM model → LoggedModel #2
 # MAGIC
-# MAGIC LightGBM handles categoricals natively. We pass the column indices via `categorical_feature`.
+# MAGIC We wrap LightGBM in a sklearn `Pipeline` with a `OneHotEncoder` for the categorical
+# MAGIC columns. This gives the logged model a portable string-typed input signature (LR
+# MAGIC and LGBM share the same shape), avoiding the dtype-mismatch issues that arise when
+# MAGIC LightGBM trains on `pandas.Categorical` but serving-time inputs arrive as strings.
+# MAGIC
+# MAGIC Trade-off: we lose LightGBM's native tree-splits-on-raw-categories optimization,
+# MAGIC but for ~20k rows the accuracy delta is negligible and the production-portability
+# MAGIC win is significant. `mlflow.lightgbm.log_model` would still work for a bare LGBM
+# MAGIC model — we use `mlflow.sklearn.log_model` here because the wrapped Pipeline is a
+# MAGIC sklearn estimator.
 
 # COMMAND ----------
 
 import lightgbm as lgb
-import numpy as np
 
-# LightGBM needs the categorical columns label-encoded (or as pandas categorical dtype)
-X_train_lgb = X_train.copy()
-X_test_lgb = X_test.copy()
-for col in CATEGORICAL:
-    X_train_lgb[col] = X_train_lgb[col].astype("category")
-    X_test_lgb[col] = X_test_lgb[col].astype("category")
-
-with mlflow.start_run(run_name="lgbm_baseline") as run_lgb:
-    lgb_clf = lgb.LGBMClassifier(
+lgb_pre = ColumnTransformer(
+    transformers=[
+        ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), CATEGORICAL),
+        ("num", "passthrough", NUMERIC),
+    ]
+)
+lgb_pipe = Pipeline([
+    ("pre", lgb_pre),
+    ("clf", lgb.LGBMClassifier(
         n_estimators=200,
         learning_rate=0.05,
         max_depth=6,
@@ -201,29 +214,22 @@ with mlflow.start_run(run_name="lgbm_baseline") as run_lgb:
         objective="binary",
         random_state=42,
         verbosity=-1,
-    )
-    lgb_clf.fit(
-        X_train_lgb,
-        y_train,
-        eval_set=[(X_test_lgb, y_test)],
-        callbacks=[lgb.early_stopping(20, verbose=False)],
-        categorical_feature=CATEGORICAL,
-    )
-    test_auc_lgb = roc_auc_score(y_test, lgb_clf.predict_proba(X_test_lgb)[:, 1])
+    )),
+])
+
+with mlflow.start_run(run_name="lgbm_baseline") as run_lgb:
+    lgb_pipe.fit(X_train, y_train)
+    test_auc_lgb = roc_auc_score(y_test, lgb_pipe.predict_proba(X_test)[:, 1])
     mlflow.log_metric("test_auc", test_auc_lgb)
 
-    # Explicit signature — required for Unity Catalog model registration.
-    # Stringify the categorical columns for the signature/input_example so the
-    # logged contract is portable. LightGBM still recognizes the categorical
-    # labels at predict time because they were stored during training.
-    sig_input_lgb = X_train_lgb.head(3).copy()
-    for col in CATEGORICAL:
-        sig_input_lgb[col] = sig_input_lgb[col].astype(str)
-    signature_lgb = infer_signature(sig_input_lgb, lgb_clf.predict(X_train_lgb.head(3)))
+    sig_input_lgb = X_train.head(3)
+    signature_lgb = infer_signature(sig_input_lgb, lgb_pipe.predict(sig_input_lgb))
 
-    # Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.lightgbm.html
-    lgb_logged = mlflow.lightgbm.log_model(
-        lgb_model=lgb_clf,
+    # Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.sklearn.html
+    # The Pipeline is a sklearn estimator → use the sklearn flavor. MLflow serializes
+    # the OneHotEncoder + LightGBM model together inside the logged model.
+    lgb_logged = mlflow.sklearn.log_model(
+        sk_model=lgb_pipe,
         name="lgbm_baseline",
         input_example=sig_input_lgb,
         signature=signature_lgb,
@@ -267,14 +273,10 @@ print(f"  creation_timestamp = {lgb_model_entity.creation_timestamp}")
 
 # COMMAND ----------
 
-# Load via the new model_id URI. The logged signature types the categorical
-# columns as `string` (for UC portability), so cast Categorical → str on the
-# input before pyfunc's schema enforcement runs.
+# Load via the new model_id URI. Because the model is now a sklearn Pipeline with
+# string-typed inputs, no dtype gymnastics are needed at predict time.
 loaded = mlflow.pyfunc.load_model(f"models:/{lgb_logged.model_id}")
-sample_for_pyfunc = X_test_lgb.head(5).copy()
-for col in CATEGORICAL:
-    sample_for_pyfunc[col] = sample_for_pyfunc[col].astype(str)
-preds = loaded.predict(sample_for_pyfunc)
+preds = loaded.predict(X_test.head(5))
 print("Predictions on 5 test rows (loaded via models:/<model_id>):")
 print(preds)
 
