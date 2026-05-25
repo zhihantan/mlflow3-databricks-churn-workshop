@@ -77,6 +77,71 @@ print(f"Will register as:       {CHURN_MODEL_NAME}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 2.5 Patch the logged models with the `lightgbm` dependency
+# MAGIC
+# MAGIC The `mlflow.sklearn.log_model()` calls in Modules 2 and 3 produced artifacts whose `requirements.txt` lists only `scikit-learn` — even though the wrapped Pipeline contains a `LGBMClassifier`. The sklearn flavor's dependency inference can't see transitive deps inside a Pipeline step. When the Model Serving container starts, `cloudpickle.load()` tries to `import lightgbm` and the container fails with:
+# MAGIC
+# MAGIC ```
+# MAGIC ModuleNotFoundError: No module named 'lightgbm'
+# MAGIC ```
+# MAGIC
+# MAGIC Fix: re-log each existing artifact via the sklearn flavor with `extra_pip_requirements=["lightgbm"]`, then point downstream registration at the patched `model_id`. We persist the patched IDs back to `workshop_state` so Modules 5+ pick them up.
+# MAGIC
+# MAGIC Long-term fix: add the same `extra_pip_requirements=` to the `log_model` calls in Modules 2 and 3 so any future end-to-end run produces correct artifacts from the start.
+
+# COMMAND ----------
+
+import lightgbm
+import mlflow
+from mlflow.models import get_model_info
+from pyspark.sql import Row
+
+
+def _relog_with_lightgbm(source_model_id: str, name: str) -> str:
+    """Re-log an existing LoggedModel via the sklearn flavor with `lightgbm`
+    explicit in the pip requirements. Returns the new model_id."""
+    sk_model = mlflow.sklearn.load_model(f"models:/{source_model_id}")
+    src_info = get_model_info(f"models:/{source_model_id}")
+
+    try:
+        input_example = mlflow.models.load_input_example(f"models:/{source_model_id}")
+    except Exception:
+        input_example = None
+
+    with mlflow.start_run(run_name=f"{name}_relog_with_lightgbm"):
+        patched = mlflow.sklearn.log_model(
+            sk_model=sk_model,
+            name=name,
+            input_example=input_example,
+            signature=src_info.signature,
+            extra_pip_requirements=[f"lightgbm=={lightgbm.__version__}"],
+        )
+    print(f"  {name}: {source_model_id} → {patched.model_id}")
+    return patched.model_id
+
+
+print("Re-logging models with explicit lightgbm dependency...")
+tuned_model_id = _relog_with_lightgbm(tuned_model_id, "lgbm_tuned")
+baseline_model_id = _relog_with_lightgbm(baseline_model_id, "lgbm_baseline")
+
+# Persist the patched IDs to state so Modules 5+ use the corrected artifacts.
+spark.createDataFrame([
+    Row(key="lgbm_tuned_model_id", value=tuned_model_id),
+    Row(key="lgbm_baseline_model_id", value=baseline_model_id),
+]).createOrReplaceTempView("_relog_upserts")
+
+spark.sql(
+    f"""
+    MERGE INTO {STATE_TABLE} AS t
+    USING _relog_upserts AS s ON t.key = s.key
+    WHEN MATCHED THEN UPDATE SET value = s.value, updated_at = current_timestamp()
+    """
+)
+print("\nState table updated with patched model_ids.")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 3. Register both models in Unity Catalog
 # MAGIC
 # MAGIC `mlflow.set_registry_uri("databricks-uc")` switches the registry from the legacy workspace registry to Unity Catalog. The 3-part name format is `<catalog>.<schema>.<model>`.

@@ -190,11 +190,17 @@ with mlflow.start_run(run_name="lgbm_tuned") as run_tuned:
 
     # Pipeline is a sklearn estimator → use the sklearn flavor for logging.
     # Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.sklearn.html
+    #
+    # `extra_pip_requirements=["lightgbm"]` is required: the sklearn flavor's
+    # dependency inference can't see transitive deps inside a Pipeline step, so it
+    # would otherwise omit lightgbm from requirements.txt — causing Model Serving
+    # to fail with ModuleNotFoundError at container load time.
     tuned_logged = mlflow.sklearn.log_model(
         sk_model=final_pipe,
         name="lgbm_tuned",
         input_example=sig_input,
         signature=tuned_signature,
+        extra_pip_requirements=[f"lightgbm=={lgb.__version__}"],
     )
 
 print(f"Tuned model_id: {tuned_logged.model_id}")
