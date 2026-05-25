@@ -267,9 +267,14 @@ print(f"  creation_timestamp = {lgb_model_entity.creation_timestamp}")
 
 # COMMAND ----------
 
-# Load via the new model_id URI:
+# Load via the new model_id URI. The logged signature types the categorical
+# columns as `string` (for UC portability), so cast Categorical → str on the
+# input before pyfunc's schema enforcement runs.
 loaded = mlflow.pyfunc.load_model(f"models:/{lgb_logged.model_id}")
-preds = loaded.predict(X_test_lgb.head(5))
+sample_for_pyfunc = X_test_lgb.head(5).copy()
+for col in CATEGORICAL:
+    sample_for_pyfunc[col] = sample_for_pyfunc[col].astype(str)
+preds = loaded.predict(sample_for_pyfunc)
 print("Predictions on 5 test rows (loaded via models:/<model_id>):")
 print(preds)
 

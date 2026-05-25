@@ -316,8 +316,14 @@ tuned_pyfunc = mlflow.pyfunc.load_model(f"models:/{tuned_logged.model_id}")
 baseline_lgb_native = mlflow.lightgbm.load_model(f"models:/{baseline_model_id}")
 tuned_lgb_native = mlflow.lightgbm.load_model(f"models:/{tuned_logged.model_id}")
 
-baseline_preds = baseline_pyfunc.predict(X_test)
-tuned_preds = tuned_pyfunc.predict(X_test)
+# pyfunc schema enforcement requires plain-string categoricals (matching the
+# logged signature); the native LightGBM loader accepts Categorical dtype directly.
+X_test_str = X_test.copy()
+for col in CATEGORICAL:
+    X_test_str[col] = X_test_str[col].astype(str)
+
+baseline_preds = baseline_pyfunc.predict(X_test_str)
+tuned_preds = tuned_pyfunc.predict(X_test_str)
 baseline_proba = baseline_lgb_native.predict_proba(X_test)[:, 1]
 tuned_proba = tuned_lgb_native.predict_proba(X_test)[:, 1]
 
