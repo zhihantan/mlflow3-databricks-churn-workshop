@@ -56,6 +56,38 @@ def _run_agent_in_fresh_loop(agent, user_msg):
         return executor.submit(_target).result()
 
 
+def _build_agent_model():
+    """Build an OpenAI Agents SDK model object backed by Databricks FMAPI Chat Completions.
+
+    The Agents SDK defaults to the OpenAI Responses API. Databricks' FMAPI passthrough
+    only supports the Responses API for OpenAI-native models (the GPT-5 family); Claude
+    and other non-OpenAI models error with:
+        BadRequestError: Responses API passthrough is not supported for model X
+
+    Forcing ``OpenAIChatCompletionsModel`` routes calls through ``/chat/completions``
+    instead, which Databricks supports for all FMAPI models including Claude.
+
+    We use ``AsyncOpenAI`` (not ``OpenAI``) because the Agents SDK is async under the hood.
+    """
+    from openai import AsyncOpenAI
+
+    # The adapter's import path has moved across openai-agents minor versions;
+    # try both common locations.
+    try:
+        from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+    except ImportError:
+        from agents import OpenAIChatCompletionsModel  # type: ignore
+
+    client = AsyncOpenAI(
+        api_key=os.environ.get("OPENAI_API_KEY", ""),
+        base_url=os.environ.get("OPENAI_BASE_URL", ""),
+    )
+    return OpenAIChatCompletionsModel(
+        model=_AgentConfig.chat_model,
+        openai_client=client,
+    )
+
+
 class _AgentConfig:
     """Mutable container populated in `RetentionAgent.load_context`."""
 
@@ -244,7 +276,9 @@ class RetentionAgent(ResponsesAgent):
                 "Use a tone that is empathetic but not overly casual. End with a clear sign-off."
             ),
             tools=[churn_score_tool, tickets_tool],
-            model=_AgentConfig.chat_model,
+            # Explicit Chat Completions adapter — bypasses Databricks' Responses API
+            # passthrough restriction that blocks Claude (and most non-OpenAI) FMAPI models.
+            model=_build_agent_model(),
         )
 
         run_result = _run_agent_in_fresh_loop(agent, user_msg)
