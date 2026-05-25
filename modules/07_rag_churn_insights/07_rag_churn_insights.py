@@ -178,6 +178,10 @@ for row in raw_results["result"]["data_array"]:
 
 import mlflow
 
+# UC-backed Prompt Registry — RAG_PROMPT_NAME is a 3-part `<catalog>.<schema>.<prompt>`
+# identifier and requires the registry URI to be set to databricks-uc.
+mlflow.set_registry_uri("databricks-uc")
+
 mlflow.set_experiment(EXPERIMENT_PATH)
 mlflow.openai.autolog()
 

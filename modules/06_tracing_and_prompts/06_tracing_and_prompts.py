@@ -95,6 +95,10 @@ else:
 
 import mlflow
 
+# UC-backed Prompt Registry — required for register_prompt() to accept the 3-part
+# `<catalog>.<schema>.<prompt_name>` identifiers defined in workshop_config.py.
+mlflow.set_registry_uri("databricks-uc")
+
 mlflow.set_experiment(EXPERIMENT_PATH)
 mlflow.openai.autolog()
 print(f"Tracing enabled. Traces will land in: {EXPERIMENT_PATH}")

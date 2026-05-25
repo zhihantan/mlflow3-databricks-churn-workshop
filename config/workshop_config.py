@@ -99,9 +99,16 @@ CHAT_MODEL_FALLBACK: Final[str] = "databricks-meta-llama-3-3-70b-instruct"
 EMBEDDING_MODEL: Final[str] = "databricks-gte-large-en"
 
 # Module 6 — Prompt Registry
-SUMMARY_PROMPT_NAME: Final[str] = f"churn_summary_{USER_SLUG}"
-RAG_PROMPT_NAME: Final[str] = f"churn_rag_qa_{USER_SLUG}"
-EMAIL_PROMPT_NAME: Final[str] = f"retention_email_{USER_SLUG}"
+#
+# UC-backed Prompt Registry (MLflow 3.12+) requires 3-part identifiers:
+# `<catalog>.<schema>.<prompt_name>`. Each part must be alphanumeric+underscore.
+# A flat name (no periods) causes the server to reject with
+# "INVALID_PARAMETER_VALUE: name is not a valid name" because it can't parse
+# the catalog/schema. Per-user isolation comes from FULL_SCHEMA already
+# encoding USER_SLUG, so the prompt suffix doesn't need to repeat it.
+SUMMARY_PROMPT_NAME: Final[str] = f"{FULL_SCHEMA}.churn_summary"
+RAG_PROMPT_NAME: Final[str] = f"{FULL_SCHEMA}.churn_rag_qa"
+EMAIL_PROMPT_NAME: Final[str] = f"{FULL_SCHEMA}.retention_email"
 
 # Module 7 — Vector Search
 VS_ENDPOINT: Final[str] = f"bolttech_vs_{USER_SLUG}"

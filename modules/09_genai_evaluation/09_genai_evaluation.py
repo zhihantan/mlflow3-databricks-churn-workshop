@@ -78,6 +78,10 @@ print(f"Sample example: {EVAL_DATASET[0]}")
 
 import mlflow
 
+# UC-backed Prompt Registry — EMAIL_PROMPT_NAME is a 3-part `<catalog>.<schema>.<prompt>`
+# identifier and requires the registry URI to be set to databricks-uc.
+mlflow.set_registry_uri("databricks-uc")
+
 # Set env vars the agent module needs at load time
 ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
 os.environ.setdefault("DATABRICKS_HOST", ctx.apiUrl().get())
