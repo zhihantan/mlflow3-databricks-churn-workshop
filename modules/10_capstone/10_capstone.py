@@ -46,10 +46,18 @@ sys.path.append(_repo_root)
 from config.workshop_config import (  # noqa: E402
     FULL_SCHEMA,
     CHURN_MODEL_NAME,
+    EXPERIMENT_PATH,
     print_config,
 )
 
 print_config()
+
+# Set the MLflow experiment + enable OpenAI autotracing so every agent invocation
+# below produces a captured trace (visible in the experiment's Traces tab).
+import mlflow
+
+mlflow.set_experiment(EXPERIMENT_PATH)
+mlflow.openai.autolog()
 
 # COMMAND ----------
 
@@ -150,7 +158,17 @@ if not use_deployed:
     print(f"Falling back to local-loaded agent model_id={agent_model_id}")
 
 
+from mlflow.entities import SpanType
+
+
+@mlflow.trace(name="capstone_call_agent", span_type=SpanType.CHAIN)
 def call_agent(customer_id: str) -> str:
+    """One traced span per customer — visible in the experiment Traces tab.
+
+    The inner agent/openai calls auto-nest underneath when running via the local
+    agent path (mlflow.openai.autolog catches them). For the deployed-endpoint
+    path, the agent endpoint emits its own trace into the experiment as well.
+    """
     payload = {"input": [{"role": "user", "content": f"Draft a retention email for customer {customer_id}"}]}
     if use_deployed:
         resp = deploy_client.predict(endpoint=agent_endpoint, inputs=payload)

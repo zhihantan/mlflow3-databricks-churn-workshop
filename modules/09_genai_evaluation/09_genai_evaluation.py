@@ -108,6 +108,14 @@ print("Agent loaded locally.")
 
 # COMMAND ----------
 
+from mlflow.entities import SpanType
+
+# `mlflow.openai.autolog()` (called in cell 5 below) auto-captures every
+# `client.chat.completions.create(...)` invocation that happens inside the
+# agent's tools. The @mlflow.trace decorator here adds an outer CHAIN span
+# per eval row so the Traces tab shows one tidy trace per evaluation call,
+# with the OpenAI / tool spans nested underneath.
+@mlflow.trace(name="agent_predict_fn", span_type=SpanType.CHAIN)
 def predict_fn(message: str) -> str:
     """Adapter: convert eval-row input to ResponsesAgent request and return the text output."""
     resp = local_agent.predict({"input": [{"role": "user", "content": message}]})
@@ -250,6 +258,13 @@ print(f"Registered prompt versions: v1={p1.version} v2={p2.version} (production 
 
 import re
 from openai import OpenAI
+from mlflow.entities import SpanType
+
+# Re-assert tracing in this cell so (1) the Databricks UI's per-cell heuristic detects
+# it and clears the "enable tracing" suggestion banner, and (2) we guarantee every
+# OpenAI call below is captured as a trace even if a prior cell's autolog state was
+# reset by some intervening operation.
+mlflow.openai.autolog()
 
 client = OpenAI(
     api_key=os.environ["DATABRICKS_TOKEN"],
@@ -266,9 +281,13 @@ def _extract_customer_id(message: str) -> str:
 def _make_predict_fn(prompt_alias: str):
     loaded = mlflow.genai.load_prompt(f"prompts:/{EMAIL_PROMPT_NAME}@{prompt_alias}")
 
+    @mlflow.trace(name=f"predict_fn_{prompt_alias}", span_type=SpanType.CHAIN)
     def predict_fn(message: str) -> str:
         cid = _extract_customer_id(message)
         filled = loaded.format(customer_id=cid)
+        # The chat.completions.create call below is auto-traced by mlflow.openai.autolog()
+        # and nests under this CHAIN span, producing a tidy retrieve→format→generate tree
+        # in the Traces tab.
         resp = client.chat.completions.create(
             model=CHAT_MODEL,
             messages=[{"role": "user", "content": filled}],
