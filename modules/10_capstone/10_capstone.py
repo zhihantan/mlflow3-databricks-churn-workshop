@@ -24,7 +24,8 @@
 
 # MAGIC %pip install --quiet \
 # MAGIC   "mlflow[databricks]>=3.12,<4" \
-# MAGIC   "databricks-sdk>=0.40"
+# MAGIC   "databricks-sdk>=0.40" \
+# MAGIC   "openai>=1.50"
 # MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
@@ -57,7 +58,15 @@ print_config()
 import mlflow
 
 mlflow.set_experiment(EXPERIMENT_PATH)
-mlflow.openai.autolog()
+try:
+    # `mlflow.openai.autolog()` requires the `openai` package to be importable for
+    # the patch hook to register. If install raced or the package isn't available
+    # for any reason, skip autolog gracefully — the @mlflow.trace decorator on
+    # call_agent still produces traces; only the auto-nested OpenAI sub-spans are
+    # missed.
+    mlflow.openai.autolog()
+except Exception as exc:
+    print(f"(mlflow.openai.autolog skipped: {type(exc).__name__}: {exc}) — manual @mlflow.trace traces still work")
 
 # COMMAND ----------
 
