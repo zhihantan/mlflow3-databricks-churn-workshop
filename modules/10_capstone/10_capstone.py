@@ -306,7 +306,7 @@ print(f"Saved to {FULL_SCHEMA}.capstone_retention_emails")
 # MAGIC | --- | --- |
 # MAGIC | **Scheduling** | Move this notebook into a Databricks **Job** with a cron schedule (daily at 09:00 local). Use Job tasks to chain Module 0 → 1 → 2 → ... if you want full retraining cadence. |
 # MAGIC | **Human-in-the-loop review** | Module 8's `agents.deploy()` provisioned a Review App — point your CS team at the URL above. They approve/edit drafts before sending. |
-# MAGIC | **Drift monitoring** | Module 5's Lakehouse Monitor is already running. Add alerts (Databricks Alerts → Slack / PagerDuty) when KS / JS distance on `payment_failures_60d` exceeds a threshold. |
+# MAGIC | **Drift monitoring** | Module 5's drift pipeline (`scipy.stats` + `mlflow.evaluate` → Delta `churn_drift_metrics` table) is already in place. Add a Databricks SQL Alert on that table — fires when `features_with_drift > 0`, sends to Slack / PagerDuty / email. |
 # MAGIC | **Cost control** | FMAPI is pay-per-token. The agent at full capstone scale (~10 outreach emails / day) is < $1 / day. Watch out when scaling to thousands of customers per run — use `scale_to_zero_enabled=True` (already on) and budget alerts on the workspace. |
 # MAGIC | **Governance** | Put the agent endpoint behind **Unity AI Gateway** (Beta) to centralize logging, permissions, and guardrails. |
 # MAGIC | **A/B testing** | Use the `@champion` / `@challenger` aliasing pattern to A/B test new model versions. Route traffic via `served_entities` weights on the serving endpoint. |
@@ -325,7 +325,7 @@ print(f"Saved to {FULL_SCHEMA}.capstone_retention_emails")
 # MAGIC 3. **Module 2** — Baseline LR + LightGBM with the new MLflow 3 `LoggedModel` entity.
 # MAGIC 4. **Module 3** — Optuna tuning + `mlflow.evaluate` with a custom business metric.
 # MAGIC 5. **Module 4** — UC Model Registry + Model Serving endpoint (background-provisioning pattern).
-# MAGIC 6. **Module 5** — Lakehouse Monitoring on an inference table with synthetic drift.
+# MAGIC 6. **Module 5** — Production monitoring with `scipy.stats` drift + `mlflow.evaluate` per window on an inference table with synthetic drift.
 # MAGIC 7. **Module 6** — MLflow Tracing + Prompt Registry foundations.
 # MAGIC 8. **Module 7** — RAG over support tickets via Vector Search.
 # MAGIC 9. **Module 8** — `ResponsesAgent` with two tools, logged + UC-registered + actually deployed.
@@ -343,7 +343,7 @@ print(f"Saved to {FULL_SCHEMA}.capstone_retention_emails")
 # MAGIC | Experiment tracking | Self-hosted MLflow / W&B / Neptune | Managed MLflow 3, integrated |
 # MAGIC | Model registry | MLflow registry + custom aliases / promotion workflow | UC Model Registry with `@champion`/`@challenger` |
 # MAGIC | Model serving | SageMaker / Triton / FastAPI on K8s + autoscaler + monitoring | Databricks Model Serving (scale-to-zero) |
-# MAGIC | Drift monitoring | Evidently / WhyLabs + custom pipeline + Grafana | Lakehouse Monitoring + MLflow time-series |
+# MAGIC | Drift monitoring | Evidently / WhyLabs + custom pipeline + Grafana | `scipy.stats` cell + `mlflow.evaluate` per window + Delta drift table + MLflow time-series |
 # MAGIC | LLM provider | OpenAI / Anthropic vendor accounts + key vault + billing isolation | Foundation Model APIs (FMAPI) |
 # MAGIC | Vector DB | Pinecone / Weaviate + custom embedding worker + sync job | Vector Search Delta Sync with managed embeddings |
 # MAGIC | Prompt management | Prompts in Git + custom loader + bespoke aliasing | MLflow Prompt Registry |

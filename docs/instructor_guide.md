@@ -16,7 +16,7 @@ Practical notes for facilitators running this workshop live. Read in conjunction
 **Day of**
 - [ ] Distribute the git clone URL to participants.
 - [ ] (Optional) Pre-warm: instructor runs Module 6's VS endpoint kickoff and Module 4's churn endpoint provisioning ~10 min before the session starts. This saves ~10 min of cumulative cold-start time across the room.
-- [ ] Have a screenshot or live demo of a populated Lakehouse Monitor drift dashboard ready — Module 5's monitor won't have populated metrics within the session.
+- [ ] (Optional) Have a Lakeview dashboard or SQL Alert pre-configured against the `churn_drift_metrics` table ready to show participants what production monitoring looks like layered on top of M5's output.
 
 ---
 
@@ -52,11 +52,11 @@ Practical notes for facilitators running this workshop live. Read in conjunction
 - Cell-by-cell narration: cell 5 fires the endpoint (non-blocking), cells 6-8 do useful work, cell 9 polls for readiness.
 - This is also where Q3 from PLAN.md was locked — the workshop **really** deploys, and Module 8 reuses the same pattern.
 
-### Module 5 — Monitoring (~3-4 min)
-**Anchor:** "Lakehouse Monitoring is a feature store for metrics: same Delta tables, same SQL, same governance."
-- Important caveat: the monitor refresh takes longer than the workshop. Participants will NOT see populated drift metrics during the session. **Have an instructor-prepared screenshot ready.**
-- 30s framing: "Drift is a Delta table you can query like any other. That's the magic — no separate observability stack."
-- The simulated drift on `payment_failures_60d` (×2 in window 2) is intentionally exaggerated so it would be unmistakable when metrics finally populate.
+### Module 5 — Monitoring (~2-3 min)
+**Anchor:** "Drift is a Delta table you wrote with one `saveAsTable` — same SQL, same governance, same alerts as everything else."
+- 30s framing: "Two complementary checks — input drift via scipy, prediction drift via `mlflow.evaluate`. Both land in MLflow + Delta. No separate observability stack."
+- The simulated drift on `payment_failures_60d` (×2 in window 2) is intentionally exaggerated so the window-over-window deltas printed at the bottom of cell 7 are unmistakable.
+- Pitch the production wiring: "Schedule this notebook nightly. SQL Alert when `features_with_drift > 0`. Alert triggers the retraining Job. That's the full MLOps feedback loop in three Databricks-native pieces."
 
 ### Module 6 — Tracing + Prompt Registry (~3 min)
 **Anchor:** "Three primitives — `autolog`, `register_prompt`, `@production` — that every later GenAI module reuses."
@@ -100,7 +100,7 @@ Practical notes for facilitators running this workshop live. Read in conjunction
 | Single curly braces in prompt template | `KeyError: 'var'` from `prompt.format(...)` | Reinforce `{{var}}` syntax |
 | Tried to run M9 before M8 finished | `Model not found` in M9 | M8 must complete logging (cell 3); local-test cells (5-6) need to have run |
 | Did NOT %pip install in each module | Stale `mlflow` from DBR 17.3 LTS ML (3.0.1) lacks 3.12 features | Always run the `%pip install` cell first; verify `mlflow.__version__` if suspicious |
-| `databricks-lakehouse-monitoring` import fails | `ModuleNotFoundError` in M5 | Run the `%pip install` cell — package isn't always preinstalled on Serverless ML |
+| Missing `scipy` in M5 | `ModuleNotFoundError: scipy` | scipy is preinstalled on DBR ML LTS + Serverless ML — if missing for any reason, add it to the pip install cell at the top of the module |
 | Hit FMAPI OTPM in M9 | Long judge-call timeouts | Wait 60s, re-run the failed eval. For groups, stagger start times. |
 
 ---

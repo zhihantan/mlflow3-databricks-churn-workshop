@@ -402,7 +402,7 @@ display(spark.table(STATE_TABLE))
 # MAGIC
 # MAGIC The REST endpoint you just provisioned is the production scoring path — Module 8's retention agent calls it as a tool via `DatabricksServingEndpoint(endpoint_name=CHURN_ENDPOINT)` with auto-auth, and Module 10's capstone uses the same endpoint for end-of-pipeline scoring. The inference table that Model Serving writes (when enabled) is what Module 5's monitoring would attach to in a real deployment. The `@champion` alias is the contract: when a future retraining run produces a better tuned model, you re-register it, flip the alias, and every consumer — batch UDF, REST endpoint, agent tool — picks up the new version with zero code change.
 # MAGIC
-# MAGIC **What's next — Module 5: Lakehouse Monitoring**
+# MAGIC **What's next — Module 5: Production Monitoring**
 # MAGIC
 # MAGIC Module 5 simulates an inference table with synthetic drift and sets up a Lakehouse monitor against the model you just deployed. Open `modules/05_monitoring/05_monitoring.py`.
 # MAGIC

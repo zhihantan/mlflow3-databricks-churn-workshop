@@ -1,6 +1,6 @@
 # MLflow 3 + Databricks Churn Workshop for bolttech
 
-A 60-minute hands-on workshop that teaches **MLflow 3 on Databricks** end-to-end through a single insurtech use case: predict which bolttech policyholders are likely to lapse next cycle, then use a GenAI agent to draft personalized retention outreach. Covers the full breadth of the MLflow 3 surface — `LoggedModel`, autologging, tracing, prompt registry, evaluation, and the `ResponsesAgent` flavor — anchored on real Databricks platform primitives (Feature Engineering in UC, UC Model Registry, Model Serving, Lakehouse Monitoring, Vector Search, Agent Framework). Every notebook runs top-to-bottom on a fresh UC-enabled workspace with zero hand-editing.
+A 60-minute hands-on workshop that teaches **MLflow 3 on Databricks** end-to-end through a single insurtech use case: predict which bolttech policyholders are likely to lapse next cycle, then use a GenAI agent to draft personalized retention outreach. Covers the full breadth of the MLflow 3 surface — `LoggedModel`, autologging, tracing, prompt registry, evaluation, and the `ResponsesAgent` flavor — anchored on real Databricks platform primitives (Feature Engineering in UC, UC Model Registry, Model Serving, Delta inference tables with MLflow-tracked drift detection, Vector Search, Agent Framework). Every notebook runs top-to-bottom on a fresh UC-enabled workspace with zero hand-editing.
 
 ---
 
@@ -17,7 +17,7 @@ flowchart LR
         M2[Module 2<br/>LR + LightGBM<br/>MLflow 3 LoggedModel]
         M3[Module 3<br/>Optuna tuning<br/>mlflow.evaluate]
         M4[Module 4<br/>UC Registry<br/>Model Serving endpoint]
-        M5[Module 5<br/>Lakehouse Monitor<br/>simulated drift]
+        M5[Module 5<br/>Delta inference + MLflow drift<br/>simulated drift]
     end
 
     subgraph GenAI [GenAI — Modules 6–9]
@@ -116,7 +116,7 @@ After `deploy` (B or C), the Job appears in the **Workflows** UI as **`[dev <you
 | 2 | Experiment tracking | `modules/02_experiment_tracking/02_experiment_tracking.py` | ~5 min | **MLflow 3 `LoggedModel` entity**; `mlflow.autolog`; `name=` replaces `artifact_path=`; `models:/<model_id>` URI |
 | 3 | Tuning & evaluation | `modules/03_tuning_and_eval/03_tuning_and_eval.py` | ~5 min | Optuna nested runs; `mlflow.evaluate(model_id=...)`; custom business metric via `make_metric` |
 | 4 | UC registry + Model Serving | `modules/04_registry_and_serving/04_registry_and_serving.py` | ~7-8 min | `mlflow.set_registry_uri('databricks-uc')`; `@champion`/`@challenger` aliases; **background-provisioning pattern** for endpoint cold-start |
-| 5 | Lakehouse Monitoring | `modules/05_monitoring/05_monitoring.py` | ~3-4 min | `lm.create_monitor(profile_type=InferenceLog(...))`; simulated drift on `payment_failures_60d` |
+| 5 | Production monitoring | `modules/05_monitoring/05_monitoring.py` | ~2-3 min | `scipy.stats` drift (KS + χ²) + `mlflow.evaluate` per window; simulated drift on `payment_failures_60d`; Delta drift table + MLflow time-series + Databricks SQL Alerts |
 | 6 | Tracing + Prompt Registry | `modules/06_tracing_and_prompts/06_tracing_and_prompts.py` | ~3 min | `mlflow.openai.autolog()`; `@mlflow.trace`; `register_prompt` w/ `{{var}}`; `@production` alias |
 | 7 | RAG over support tickets | `modules/07_rag_churn_insights/07_rag_churn_insights.py` | ~6-8 min | `create_delta_sync_index` w/ managed embeddings; traced RAG chain |
 | 8 | Retention agent + deploy | `modules/08_retention_agent/08_retention_agent.py` | ~9 min | `mlflow.pyfunc.ResponsesAgent`; OpenAI Agents SDK; `resources=[...]`; **actual `agents.deploy()`** |

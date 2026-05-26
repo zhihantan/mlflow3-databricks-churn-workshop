@@ -65,7 +65,7 @@ flowchart LR
 
     subgraph MON [Module 5 — Monitoring]
         INF[Simulated inference table<br/>2-window drift]
-        MO[Lakehouse Monitor<br/>InferenceLog profile]
+        MO[scipy.stats drift<br/>+ mlflow.evaluate per window]
         DM[Drift metrics<br/>auto-generated Delta]
     end
 

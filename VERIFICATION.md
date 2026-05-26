@@ -25,7 +25,7 @@ Each notebook was reviewed against these criteria:
 | 02 Experiment tracking | ✅ | ✅ | ✅ (`MERGE INTO` for state, new runs are additive) | ✅ | ✅ | ~5 min / ≤6 min | Demonstrates `LoggedModel` w/ explicit `name=` kwarg + `models:/<model_id>` URI |
 | 03 Tuning & evaluation | ✅ | ✅ | ✅ | ✅ | ✅ | ~5 min / ≤6 min | 15 Optuna trials (per `N_OPTUNA_TRIALS`); `mlflow.evaluate(model_id=...)` binds eval to LoggedModel |
 | 04 Registry & serving | ✅ | ✅ | ✅ (`update_config` if endpoint exists, else `create`) | ✅ | ✅ | ~7-8 min / ≤8 min | **Background-provisioning pattern** absorbs ~5-7 min endpoint cold-start. Aliases set via `MlflowClient.set_registered_model_alias` |
-| 05 Lakehouse Monitoring | ✅ | ✅ | ✅ (`lm.delete_monitor` then re-create) | ✅ | ✅ | ~3-4 min / ≤4 min | Uses legacy `databricks.lakehouse_monitoring` API (explicitly `%pip install`-ed). Simulated drift on `payment_failures_60d` |
+| 05 Production monitoring | ✅ | ✅ | ✅ (Delta `mode("overwrite")` for the drift table; eval runs are append-only) | ✅ | ✅ | ~2-3 min / ≤4 min | `scipy.stats` KS + χ² for input drift + `mlflow.evaluate` per window for prediction drift; persists to `<schema>.churn_drift_metrics`. Simulated drift on `payment_failures_60d` |
 | 06 Tracing + Prompt Registry | ✅ | ✅ | ✅ (idempotent endpoint check; prompt registry is versioned/append-only) | ✅ | ✅ | ~2-3 min / ≤3 min | Kicks off VS endpoint provisioning in cell 2 so Module 7 finds it ready |
 | 07 RAG | ✅ | ✅ | ✅ (`list_indexes` check before create) | ✅ | ✅ | ~6-8 min / ≤8 min | Delta Sync + managed embeddings (`databricks-gte-large-en`). Endpoint polled with 10-min timeout |
 | 08 Retention agent | ✅ | ✅ | ✅ (try/except around `agents.deploy` kwargs) | ✅ | ✅ | ~8-9 min / ≤9 min | **Two files**: `agent.py` (ResponsesAgent subclass) + `08_retention_agent.py` (driver). Config injected via JSON artifact, not env vars |
@@ -46,10 +46,8 @@ These are points where my research left an open question that can only be conclu
    - **Verify:** `help(mlflow.get_logged_model)` in a notebook, or check `dir(mlflow)` for the function.
    - **Fallback if it doesn't exist:** use `MlflowClient().get_logged_model(model_id)` or iterate via `mlflow.search_logged_models(...)`.
 
-2. **`databricks.lakehouse_monitoring` package availability** (Module 5).
-   - Module 5 `%pip install`s `databricks-lakehouse-monitoring` and imports it. The package is widely documented but I haven't confirmed its current pip status.
-   - **Verify:** `%pip install databricks-lakehouse-monitoring` succeeds, and `import databricks.lakehouse_monitoring as lm` works.
-   - **Fallback:** rewrite Module 5 to use the newer `WorkspaceClient.data_quality.create_monitor(...)` SDK surface — the calls + fields are documented in `docs/research_log.md`.
+2. ~~**`databricks.lakehouse_monitoring` package availability** (Module 5).~~ **Resolved.**
+   - The legacy `databricks.lakehouse_monitoring` package was removed from PyPI. Module 5 was rewritten to compute drift directly via `scipy.stats` (KS + χ²) and `mlflow.evaluate(model_type="classifier")` per window — no managed-monitor dependency. The drift metrics land in a Delta table + MLflow time-series the same way Lakehouse Monitoring's output would.
 
 3. **`databricks.agents.deploy()` signature** (Module 8).
    - I wrapped the call in `try/except TypeError` to handle kwarg incompatibilities. The minimal-kwargs fallback should always work.
@@ -70,8 +68,8 @@ These are points where my research left an open question that can only be conclu
 
 ### Medium priority — visual / cosmetic
 
-7. **Lakehouse Monitor profile / drift metric table column names** (Module 5).
-   - The example SQL query in Module 5 cell 8 is wrapped in a comment block — it won't execute, but if the table-name auto-construction in the comment is wrong, learners might be confused. Worth confirming against an actual auto-created monitor.
+7. ~~**Lakehouse Monitor profile / drift metric table column names** (Module 5).~~ **Resolved.**
+   - Module 5 no longer depends on auto-generated monitor tables — the drift Delta table is hand-written by the notebook with a known schema (feature / feature_type / test_statistic / p_value / mean_shift_pct / drift_detected). The SQL query in cell 8 runs against that table directly.
 
 8. **MLflow 3 LoggedModel `model_id` field accessor** (Module 2).
    - Used as `mlflow.sklearn.log_model(...).model_id` and `mlflow.lightgbm.log_model(...).model_id`. If the returned object exposes the ID under a different name (e.g. `.logged_model_id` or `.id`), Module 2 cell 7 will `AttributeError`.

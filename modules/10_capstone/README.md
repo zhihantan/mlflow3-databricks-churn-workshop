@@ -7,7 +7,7 @@ This module introduces no new APIs — it stitches together everything Modules 0
 **Concepts covered**
 - End-to-end orchestration of classic ML + GenAI in a single flow
 - Production patterns: scheduled Jobs, Slack alerting, human-in-the-loop review via the Databricks Review App
-- Where Lakehouse Monitoring (Module 5) plugs in to close the feedback loop
+- Where Module 5's drift detection (`scipy.stats` + `mlflow.evaluate` + Delta drift table + SQL Alert) plugs in to close the feedback loop
 - Discussion of governance (Unity AI Gateway) and cost (FMAPI rate limits, endpoint scale-to-zero)
 
 **Prerequisites**
