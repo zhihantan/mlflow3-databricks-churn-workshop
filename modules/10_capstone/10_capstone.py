@@ -153,20 +153,21 @@ def _endpoint_ready(name: str) -> bool:
         return False
 
 
+# Always load the local agent — it's a cheap (~3-5s) load and gives us an automatic
+# fallback if the deployed endpoint errors (stale agent.py code, transient outage, etc).
+ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+os.environ.setdefault("DATABRICKS_HOST", ctx.apiUrl().get())
+os.environ.setdefault("DATABRICKS_TOKEN", ctx.apiToken().get())
+from config.workshop_config import CHURN_ENDPOINT as _CE, VS_ENDPOINT as _VE, VS_INDEX as _VI, CHAT_MODEL as _CM
+os.environ["CHURN_ENDPOINT"] = _CE
+os.environ["VS_ENDPOINT"] = _VE
+os.environ["VS_INDEX"] = _VI
+os.environ["CHAT_MODEL"] = _CM
+local_agent = mlflow.pyfunc.load_model(f"models:/{agent_model_id}")
+print(f"Local agent loaded (model_id={agent_model_id}) — always available as fallback")
+
 use_deployed = bool(agent_endpoint) and _endpoint_ready(agent_endpoint)
-print(f"Agent endpoint ready: {use_deployed}")
-if not use_deployed:
-    # Load local agent as fallback
-    ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
-    os.environ.setdefault("DATABRICKS_HOST", ctx.apiUrl().get())
-    os.environ.setdefault("DATABRICKS_TOKEN", ctx.apiToken().get())
-    from config.workshop_config import CHURN_ENDPOINT as _CE, VS_ENDPOINT as _VE, VS_INDEX as _VI, CHAT_MODEL as _CM
-    os.environ["CHURN_ENDPOINT"] = _CE
-    os.environ["VS_ENDPOINT"] = _VE
-    os.environ["VS_INDEX"] = _VI
-    os.environ["CHAT_MODEL"] = _CM
-    local_agent = mlflow.pyfunc.load_model(f"models:/{agent_model_id}")
-    print(f"Falling back to local-loaded agent model_id={agent_model_id}")
+print(f"Will prefer deployed endpoint when available: {use_deployed}")
 
 
 from mlflow.entities import SpanType
@@ -179,12 +180,23 @@ def call_agent(customer_id: str) -> str:
     The inner agent/openai calls auto-nest underneath when running via the local
     agent path (mlflow.openai.autolog catches them). For the deployed-endpoint
     path, the agent endpoint emits its own trace into the experiment as well.
+
+    Robust to deployed-endpoint failures: tries the deployed endpoint first when
+    available, automatically falls back to the locally-loaded agent on any
+    exception (stale code embedded in the deployed model, transient 5xx, auth
+    errors, etc).
     """
     payload = {"input": [{"role": "user", "content": f"Draft a retention email for customer {customer_id}"}]}
+
     if use_deployed:
-        resp = deploy_client.predict(endpoint=agent_endpoint, inputs=payload)
+        try:
+            resp = deploy_client.predict(endpoint=agent_endpoint, inputs=payload)
+        except Exception as exc:
+            print(f"  [deployed endpoint failed for {customer_id}: {type(exc).__name__}; falling back to local agent]")
+            resp = local_agent.predict(payload)
     else:
         resp = local_agent.predict(payload)
+
     parts: list[str] = []
     for item in resp.get("output", []):
         if item.get("type") == "message":

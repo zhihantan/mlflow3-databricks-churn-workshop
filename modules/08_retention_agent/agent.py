@@ -104,34 +104,47 @@ def _configure_openai_for_databricks() -> None:
     (used internally by the OpenAI Agents SDK) reaches the Databricks FMAPI instead
     of api.openai.com.
 
-    Auth-source priority:
-        1. Direct env vars: DATABRICKS_HOST / DATABRICKS_WORKSPACE_URL +
-           DATABRICKS_TOKEN / DATABRICKS_API_TOKEN. Driver notebooks set these
-           explicitly; Databricks Model Serving usually injects them when the
-           model is logged with `resources=[...]` declarations.
-        2. Fallback to the Databricks SDK's WorkspaceClient auto-detection. Covers
-           service-principal auth, workload identity, and any environment where
-           the direct env vars haven't been populated.
+    Auth-source priority (Databricks SDK first because it covers all auth flavors
+    uniformly — PAT, workload identity, OAuth — whereas raw env vars only cover the
+    PAT case):
 
-    No-op if neither source yields creds (e.g., during a local-only test outside a
-    Databricks environment).
+        1. ``WorkspaceClient.config.token`` (PAT path — set in notebook contexts).
+        2. ``WorkspaceClient.config.authenticate()`` Bearer token. This is the
+           workload-identity / OAuth path used by Databricks Model Serving when an
+           agent is deployed via ``agents.deploy()`` — there is **no**
+           DATABRICKS_TOKEN env var to read.
+        3. Raw env vars: DATABRICKS_HOST/_TOKEN / DATABRICKS_WORKSPACE_URL/_API_TOKEN.
+           Useful for environments that don't have the Databricks SDK available.
+
+    Always re-resolves — does not short-circuit on already-set OPENAI_API_KEY since
+    OAuth / workload-identity tokens have short TTLs.
     """
-    host = (
-        os.environ.get("DATABRICKS_HOST")
-        or os.environ.get("DATABRICKS_WORKSPACE_URL")
-    )
-    token = (
-        os.environ.get("DATABRICKS_TOKEN")
-        or os.environ.get("DATABRICKS_API_TOKEN")
-    )
-    if not (host and token):
-        try:
-            from databricks.sdk import WorkspaceClient
-            w = WorkspaceClient()
-            host = host or w.config.host
-            token = token or w.config.token
-        except Exception:
-            pass
+    host = None
+    token = None
+
+    # Primary: Databricks SDK auto-detection (handles all auth flavors)
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        w = WorkspaceClient()
+        host = w.config.host
+        token = getattr(w.config, "token", None)
+        if not token:
+            # Workload-identity / OAuth path — pull the Bearer token out of the
+            # SDK's freshly-authenticated request headers.
+            try:
+                headers = w.config.authenticate()
+                auth = headers.get("Authorization", "") if isinstance(headers, dict) else ""
+                if auth.startswith("Bearer "):
+                    token = auth[len("Bearer "):]
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Fallback: raw env vars (covers environments without the Databricks SDK)
+    host = host or os.environ.get("DATABRICKS_HOST") or os.environ.get("DATABRICKS_WORKSPACE_URL")
+    token = token or os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_TOKEN")
 
     if host and token:
         os.environ["OPENAI_BASE_URL"] = f"{host.rstrip('/')}/serving-endpoints"
