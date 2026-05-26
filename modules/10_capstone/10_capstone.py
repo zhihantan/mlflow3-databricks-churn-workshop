@@ -25,7 +25,9 @@
 # MAGIC %pip install --quiet \
 # MAGIC   "mlflow[databricks]>=3.12,<4" \
 # MAGIC   "databricks-sdk>=0.40" \
-# MAGIC   "openai>=1.50"
+# MAGIC   "openai>=1.50" \
+# MAGIC   "lightgbm>=4.6" \
+# MAGIC   "scikit-learn>=1.6"
 # MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
