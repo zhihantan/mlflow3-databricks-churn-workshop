@@ -1,54 +1,68 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Deploy & Run the Workshop e2e Job — one-click from a Databricks notebook
+# MAGIC # Deploy & Run the Workshop e2e Job
+# MAGIC ### One-click deployment of all 10 workshop modules — no CLI required
 # MAGIC
-# MAGIC Run this notebook AFTER cloning the workshop repo into your Databricks workspace via
-# MAGIC **Repos** / **Git folders**. It creates the same `MLFlow Workshop e2e job` that the
-# MAGIC bundle (`databricks.yml` + `resources/workshop_e2e_job.yml`) defines, but does it
-# MAGIC via the **Databricks Python SDK** instead of the `databricks bundle` CLI.
+# MAGIC ---
 # MAGIC
-# MAGIC **Why the SDK path?**
+# MAGIC > **TL;DR** — `Run All` this notebook to create the `MLFlow Workshop e2e job` in your Databricks Workflows + (optionally) trigger a run. Everything happens through the Python SDK using the notebook's own auth context. No env vars, no CLI install, no `databricks auth login`.
 # MAGIC
-# MAGIC The `databricks` CLI is restricted in `%sh` cells on Serverless notebook compute (and
-# MAGIC most non-interactive job contexts) — the platform itself recommends the Python SDK
-# MAGIC for programmatic API use from inside notebooks. This rewrite uses
-# MAGIC `databricks.sdk.WorkspaceClient` which:
+# MAGIC ---
 # MAGIC
-# MAGIC - works everywhere a notebook runs (Serverless ✓, classic clusters ✓, jobs ✓);
-# MAGIC - inherits the notebook's auth context automatically — no env vars, no CLI install;
-# MAGIC - produces a Job that's functionally identical to what `bundle deploy` would create.
+# MAGIC ## How it works
 # MAGIC
-# MAGIC The bundle files (`databricks.yml` + `resources/workshop_e2e_job.yml`) stay in the
-# MAGIC repo for users who prefer the CLI workflow from their own terminal (Quickstart C in
-# MAGIC the top-level README).
+# MAGIC ```
+# MAGIC   ┌─────────────────────┐   ┌──────────────────┐   ┌──────────────────────┐
+# MAGIC   │  Cell 2: pip + SDK  │ → │  Cell 3: build   │ → │  Cell 4: create or   │
+# MAGIC   │  install            │   │  WorkspaceClient │   │  reset() the Job     │
+# MAGIC   │                     │   │  + resolve paths │   │  (idempotent)        │
+# MAGIC   └─────────────────────┘   └──────────────────┘   └──────────┬───────────┘
+# MAGIC                                                               │
+# MAGIC                                            ┌──────────────────┴───────────────────┐
+# MAGIC                                            ▼                                      ▼
+# MAGIC                              ┌─────────────────────────┐         ┌─────────────────────────┐
+# MAGIC                              │  Workflows UI: click    │   OR    │  Cell 6: run_now() —    │
+# MAGIC                              │  Run now on the new Job │         │  triggers from notebook │
+# MAGIC                              └─────────────────────────┘         └─────────────────────────┘
+# MAGIC ```
 # MAGIC
-# MAGIC **What this notebook does**
+# MAGIC ## Why the SDK path (and not the CLI)?
 # MAGIC
-# MAGIC 1. Resolves the workspace path of the cloned repo so notebook tasks point at the
-# MAGIC    user's actual Git folder paths.
-# MAGIC 2. Builds a 10-task Job spec mirroring `resources/workshop_e2e_job.yml`.
-# MAGIC 3. **Idempotently** creates or updates the Job (looks up by name; updates if it
-# MAGIC    already exists). Safe to re-run after pulling repo changes.
-# MAGIC 4. Prints the Job URL so you can monitor in the Workflows UI.
-# MAGIC 5. Optional final cell: triggers a run via `w.jobs.run_now(...)`.
+# MAGIC The `databricks` CLI is restricted in `%sh` cells on Serverless notebook compute (and most non-interactive contexts) — the platform itself recommends the Python SDK for programmatic API use from inside notebooks. This notebook uses `databricks.sdk.WorkspaceClient`, which:
 # MAGIC
-# MAGIC **Prerequisites**
+# MAGIC | Property | What it gives you |
+# MAGIC | --- | --- |
+# MAGIC | **Runs everywhere** | Serverless, classic clusters, and jobs alike — no environment-specific install. |
+# MAGIC | **Zero auth setup** | Inherits the notebook's workspace credentials automatically. |
+# MAGIC | **Identical Job output** | Produces a Job functionally indistinguishable from `databricks bundle deploy`. |
 # MAGIC
-# MAGIC - Repo cloned to your workspace via Git folders (you're reading this inside the clone).
-# MAGIC - Permission to create Jobs in the workspace (any standard developer role).
+# MAGIC > **Note** — the bundle files (`databricks.yml` + `resources/workshop_e2e_job.yml`) stay in the repo so users with local CLI access can still drive the deploy from a terminal (Quickstart C in the top-level README).
 # MAGIC
-# MAGIC **Expected runtime**
+# MAGIC ## Prerequisites
 # MAGIC
-# MAGIC - Deploy: ~5 seconds.
-# MAGIC - Optional Job run (full e2e workshop): ~40-60 minutes if you execute the final cell.
+# MAGIC - Repo cloned to your workspace via **Repos** / **Git folders** (you're reading this inside the clone).
+# MAGIC - Permission to create Jobs in the workspace — any standard developer role suffices.
+# MAGIC
+# MAGIC ## Expected runtime
+# MAGIC
+# MAGIC | Phase | Wall-clock |
+# MAGIC | --- | --- |
+# MAGIC | Deploy (cells 1–4) | **~5 seconds** |
+# MAGIC | Optional Job run (cell 6 + e2e workshop) | **~40-60 minutes** |
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Ensure the Databricks SDK is installed
+# MAGIC ---
+# MAGIC ## Step 1 — Install the Databricks SDK
 # MAGIC
-# MAGIC Pre-installed on DBR ML LTS, but the Serverless ML base env can lag — explicit
-# MAGIC install + restart guarantees a recent version.
+# MAGIC The SDK is pre-installed on DBR ML LTS, but the Serverless ML base env can lag a release behind. An explicit pin + Python restart guarantees you're on a version that supports the Jobs API surface used below.
+# MAGIC
+# MAGIC **Expected output**
+# MAGIC ```
+# MAGIC Successfully installed databricks-sdk-0.40.0
+# MAGIC Python interpreter will be restarted.
+# MAGIC ```
 
 # COMMAND ----------
 
@@ -58,11 +72,17 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Resolve the repo root + spin up the SDK client
+# MAGIC ---
+# MAGIC ## Step 2 — Resolve the repo root and spin up the SDK client
 # MAGIC
-# MAGIC The notebook task definitions will reference the user's actual Git-folder paths in
-# MAGIC the workspace, computed from this notebook's own `notebookPath()`. No env var
-# MAGIC plumbing needed — `WorkspaceClient()` auto-discovers auth from the notebook context.
+# MAGIC Two pieces of context the SDK needs:
+# MAGIC
+# MAGIC | What | Where it comes from |
+# MAGIC | --- | --- |
+# MAGIC | **Workspace repo path** | `dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath()` — strip two parents to get the repo root. |
+# MAGIC | **Auth (host + token)** | `WorkspaceClient()` auto-discovers from the notebook runtime — no env vars to set, no profile to configure. |
+# MAGIC
+# MAGIC The cell sanity-checks the resolved path by confirming `databricks.yml` exists at the repo root, then prints the active user as proof of successful auth.
 
 # COMMAND ----------
 
@@ -100,11 +120,27 @@ print(f"Current user:         {w.current_user.me().user_name}")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3. Build the Job spec (mirrors `resources/workshop_e2e_job.yml`)
+# MAGIC ---
+# MAGIC ## Step 3 — Build the 10-task Job spec
 # MAGIC
-# MAGIC 10 chained `notebook_task` entries, each pointing at the user's workspace path for
-# MAGIC that module. No cluster spec → Serverless. `module_08_retention_agent` gets a 30-min
-# MAGIC timeout to absorb the `agents.deploy()` cold-start.
+# MAGIC Mirrors `resources/workshop_e2e_job.yml` task-for-task. Each task is a `notebook_task` pointing at one workshop module; `depends_on` chains them into a single linear DAG.
+# MAGIC
+# MAGIC ### Task graph
+# MAGIC
+# MAGIC ```
+# MAGIC  M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M8 ─► M9 ─► M10
+# MAGIC  fe    LM    tune  reg   mon   tr    rag  agent eval  capstone
+# MAGIC                          drift  +    + VS  ⏱30m
+# MAGIC                                prom
+# MAGIC ```
+# MAGIC
+# MAGIC ### Compute + timeout choices
+# MAGIC
+# MAGIC | Choice | Why |
+# MAGIC | --- | --- |
+# MAGIC | **No `new_cluster` / `job_cluster_key`** | Omitting compute config → tasks run on Serverless notebook compute (workspace policy mandates it). |
+# MAGIC | **`timeout_seconds=1800` on M8 only** | `agents.deploy()` cold-start can run 8-12 min. 30 min headroom prevents premature task failure without letting a true hang block the chain forever. |
+# MAGIC | **Linear chain via `depends_on`** | Mirrors how a participant would walk the workshop — each module reads state the previous one wrote to `workshop_state`. |
 
 # COMMAND ----------
 
@@ -148,14 +184,17 @@ for t in tasks:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Create-or-update the Job (idempotent)
+# MAGIC ---
+# MAGIC ## Step 4 — Create or update the Job (idempotent)
 # MAGIC
-# MAGIC Looks up by name first. If a job named `MLFlow Workshop e2e job` already exists
-# MAGIC (from a previous run of this notebook), updates its settings in place via
-# MAGIC `jobs.reset(...)`. Otherwise creates a fresh one via `jobs.create(...)`.
+# MAGIC Lookup-then-write pattern keeps re-runs safe:
 # MAGIC
-# MAGIC Either way, the same `job_id` is reused on subsequent runs — re-running this notebook
-# MAGIC won't accumulate duplicates.
+# MAGIC | Scenario | Action |
+# MAGIC | --- | --- |
+# MAGIC | **First run** | No job named `MLFlow Workshop e2e job` exists → `w.jobs.create(...)` provisions a new one and returns a fresh `job_id`. |
+# MAGIC | **Re-run after `git pull`** | Job exists → `w.jobs.reset(job_id, new_settings=...)` overwrites task definitions in place. **Same `job_id`**, so existing run history is preserved. |
+# MAGIC
+# MAGIC > **Note** — `jobs.reset()` is a full-overwrite, not a merge. Tasks not present in the new settings are removed. This is what we want: the YAML / SDK definition is the source of truth.
 
 # COMMAND ----------
 
@@ -186,13 +225,19 @@ print(f"\nJob URL: {w.config.host}/jobs/{job_id}")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. (Optional) Trigger a run from this notebook
+# MAGIC ---
+# MAGIC ## Step 5 — (Optional) Trigger a run
 # MAGIC
-# MAGIC `w.jobs.run_now(...)` returns immediately with a `run_id` — the run executes in the
-# MAGIC background. The full e2e takes ~40-60 min; monitor in the Workflows UI via the URL
-# MAGIC printed above (or the URL printed by this cell).
+# MAGIC > **Heads up — long-running** — the full e2e workshop takes **~40-60 minutes** wall-clock. `run_now()` returns the `run_id` immediately and the run executes in the background; you don't need to keep this notebook attached.
 # MAGIC
-# MAGIC Skip this cell if you'd rather trigger from the Workflows UI ("Run now" button).
+# MAGIC ### Two ways to start the run
+# MAGIC
+# MAGIC | From | How |
+# MAGIC | --- | --- |
+# MAGIC | **This notebook** | Execute the cell below — gives you a `run_id` + a direct URL to that specific run. |
+# MAGIC | **Workflows UI** | Skip the cell below; open the Job URL printed by Step 4 and click **Run now**. |
+# MAGIC
+# MAGIC Pick whichever fits your demo flow.
 
 # COMMAND ----------
 
@@ -203,14 +248,22 @@ print(f"Run URL: {w.config.host}/jobs/{job_id}/runs/{run.run_id}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Tear-down
 # MAGIC
-# MAGIC To delete the Job entirely:
+# MAGIC The notebook deploys the Job; data resources are managed separately. The split is deliberate — you can iterate on Job task graphs without nuking your synthetic data, models, and endpoints.
 # MAGIC
-# MAGIC ```python
-# MAGIC w.jobs.delete(job_id=job_id)
-# MAGIC ```
+# MAGIC | What to clean up | How |
+# MAGIC | --- | --- |
+# MAGIC | **The Job itself** | Run this cell: `w.jobs.delete(job_id=job_id)` |
+# MAGIC | **Workshop data resources** (catalog, schema, registered models, serving + VS endpoints) | Run [`scripts/reset_workshop.py`](./reset_workshop.py) — its own notebook with idempotent teardown steps. |
 # MAGIC
-# MAGIC To clean up the workshop's data resources (catalog, schema, registered models,
-# MAGIC serving endpoints, VS endpoints + indexes), run [`scripts/reset_workshop.py`](./reset_workshop.py)
-# MAGIC separately. That's a deliberate split — deleting the Job doesn't touch the data.
+# MAGIC ---
+# MAGIC
+# MAGIC ### What you accomplished
+# MAGIC
+# MAGIC - Deployed an end-to-end validation Job using the Databricks Python SDK — zero CLI dependency, zero auth plumbing.
+# MAGIC - Established a re-runnable, idempotent deployment pattern: `jobs.reset()` if exists, `jobs.create()` if not.
+# MAGIC - (Optionally) triggered a run that chains all 10 workshop modules in dependency order on Serverless compute.
+# MAGIC
+# MAGIC Open the Job URL printed above to watch progress, or come back later — the run is detached from this notebook session.
