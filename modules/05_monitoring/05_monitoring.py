@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 05 — Production Monitoring with MLflow + scipy
+# MAGIC ### Catch drift before it silently degrades retention targeting
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Simulate a 2-window inference table where window 2 has deliberately shifted feature distributions. Compute drift with `scipy.stats` (KS for numerics, χ² for categoricals), evaluate model-performance shift with `mlflow.evaluate(model_type="classifier")` per window, persist results to a queryable Delta drift table + MLflow time-series metrics. A SQL Alert closes the loop.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC In production, the model you deployed in Module 4 will eventually face data drift — payment behaviors shift, support-ticket volumes spike, new countries onboard. This module builds a **simulated** inference table with synthetic drift, then computes drift metrics with `scipy.stats` and tracks them as a time series in MLflow + a Delta `churn_drift_metrics` table.
 # MAGIC
@@ -47,6 +54,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Imports & config
 
 # COMMAND ----------
@@ -72,6 +80,7 @@ print_config()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Recover the deployed model version from workshop state
 
 # COMMAND ----------
@@ -84,6 +93,7 @@ print(f"Champion model version: {champion_version}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Build a simulated 2-window inference table
 # MAGIC
 # MAGIC We synthesize 7 days of inferences per window. Window 1 (the baseline window, days 1-7) is drawn directly from the feature table. Window 2 (the drifted window, days 8-14) takes the same sample but multiplies `payment_failures_60d` by 2 and `pending_claims_90d` by 1.5 — simulating a real-world shift where payment infrastructure problems or a backlog of claims cause the distribution to drift.
@@ -134,6 +144,7 @@ print(f"Window 2 avg payment_failures_60d: {inference_pdf[inference_pdf['inferen
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Write the inference table to Delta
 
 # COMMAND ----------
@@ -151,6 +162,7 @@ display(spark.table(INFERENCE_TABLE).limit(5))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. Compute per-feature drift metrics (window 2 vs window 1)
 # MAGIC
 # MAGIC For each feature we compute window-over-window drift relative to window 1 as the baseline:
@@ -221,6 +233,7 @@ print(drift_pdf.to_string(index=False))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Persist drift metrics + log to MLflow
 # MAGIC
 # MAGIC Two destinations:
@@ -266,6 +279,7 @@ display(spark.table(DRIFT_TABLE).orderBy(F.col("p_value").asc()))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Prediction-level drift via `mlflow.evaluate()`
 # MAGIC
 # MAGIC Input drift is only half the story — what we really care about is whether *model performance* has shifted. We use `mlflow.evaluate(model_type="classifier")` once per window to compute classification metrics (accuracy, F1, log loss, AUC) on the predictions already in the inference table, then log them as MLflow metrics so window 1 vs window 2 are directly comparable in the MLflow UI.
@@ -314,6 +328,7 @@ if len(per_window_metrics) == 2:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 8. Drift query against the persisted Delta table
 # MAGIC
 # MAGIC Same idea as the Lakehouse-Monitor output — but on a Delta table you wrote yourself. Plug this into a Databricks SQL alert (or a Job that emails when `features_with_drift > 0`) for production-grade retraining triggers.
@@ -340,6 +355,7 @@ display(
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just learned**

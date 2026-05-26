@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 03 — Hyperparameter Tuning + `mlflow.evaluate`
+# MAGIC ### From AUC to dollars — bind a business metric to a LoggedModel
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Run 15 Optuna trials as nested MLflow runs, retrain a tuned LightGBM pipeline, then call `mlflow.evaluate(model_type="classifier", model_id=...)` with a custom *expected retention value* business metric. The `model_id=` parameter binds the evaluation results to the LoggedModel itself, not just to a transient run — full lineage from tuning → eval → registry → serving.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC **Learning objectives**
 # MAGIC
@@ -42,6 +49,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Imports & config
 
 # COMMAND ----------
@@ -66,6 +74,7 @@ print_config()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Load training data + read baseline model_id from workshop state
 
 # COMMAND ----------
@@ -111,6 +120,7 @@ print(f"Baseline LGBM model_id (from Module 2): {baseline_model_id}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Define the Optuna objective with nested MLflow runs
 # MAGIC
 # MAGIC Each Optuna trial is one `mlflow.start_run(nested=True)`. We manually `log_params` and `log_metric` — Optuna doesn't yet have a first-party MLflow autolog hook in DBR 17.3 LTS ML's environment, so the manual logging here is also pedagogically useful (shows what autolog does under the hood).
@@ -164,6 +174,7 @@ def objective(trial: optuna.Trial) -> float:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Run the Optuna study
 
 # COMMAND ----------
@@ -182,6 +193,7 @@ print(f"Best params: {best_params}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. Train the final tuned model → new `LoggedModel`
 # MAGIC
 # MAGIC We retrain on the best Optuna params and log as a fresh `LoggedModel`. Note again `name="lgbm_tuned"` — MLflow 3's replacement for `artifact_path=`.
@@ -223,6 +235,7 @@ print(f"Tuned test AUC: {auc:.4f}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Define a custom business metric: *expected retention value*
 # MAGIC
 # MAGIC AUC is a fine ML metric but doesn't directly answer "what's this model worth in dollars?". We add a custom metric using `mlflow.metrics.make_metric`:
@@ -277,6 +290,7 @@ expected_retention_value = make_metric(
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Run `mlflow.evaluate` and bind results to the tuned `LoggedModel`
 # MAGIC
 # MAGIC The MLflow 3 `model_id=` parameter is the key here — it attaches the evaluation metrics, tables, and dataset reference to the LoggedModel rather than just to a run. That gives us per-model lineage that survives across runs.
@@ -313,6 +327,7 @@ for name, value in sorted(eval_results.metrics.items()):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 8. Quick "tuned vs baseline" comparison
 # MAGIC
 # MAGIC `mlflow.evaluate(baseline_model=...)` was **removed in MLflow 3** — we compute the comparison ourselves now. Pass each model through `mlflow.pyfunc.load_model` via its `model_id` URI.
@@ -350,6 +365,7 @@ display(comparison_df)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 9. Persist the tuned `model_id` for Module 4
 
 # COMMAND ----------
@@ -375,6 +391,7 @@ display(spark.table(STATE_TABLE))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just learned**

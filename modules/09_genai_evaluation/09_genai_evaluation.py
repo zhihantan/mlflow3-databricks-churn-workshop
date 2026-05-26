@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 09 — GenAI Evaluation with `mlflow.genai.evaluate`
+# MAGIC ### LLM-as-judge regression testing — CI for prompts
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Run `mlflow.genai.evaluate` on the Module 8 agent with a 25-example regression set scored by `Correctness`, `Safety`, and a custom `Guidelines("bolttech_voice", ...)` LLM-as-judge. Then register a v2 prompt, re-evaluate, and compare runs side-by-side in the MLflow UI. The pattern you'd block prompt-promotion on in CI.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC Take the Module 8 agent and the 25-example eval dataset from `eval_dataset.py`, and run a complete LLM-as-judge evaluation: built-in `Correctness` + `Safety` scorers plus a custom `Guidelines` scorer that codifies the bolttech voice rules.
 # MAGIC
@@ -49,6 +56,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Imports & config
 
 # COMMAND ----------
@@ -85,6 +93,7 @@ print(f"Sample example: {EVAL_DATASET[0]}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Load the local agent from Module 8
 
 # COMMAND ----------
@@ -115,6 +124,7 @@ print("Agent loaded locally.")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Define `predict_fn`
 # MAGIC
 # MAGIC `mlflow.genai.evaluate` calls `predict_fn(**inputs)` for each row. Our `inputs` dict has a single `message` key, so the function signature is `predict_fn(message: str) -> str`.
@@ -148,6 +158,7 @@ print(predict_fn(**EVAL_DATASET[0]["inputs"])[:400], "...")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Configure scorers
 # MAGIC
 # MAGIC Three scorers:
@@ -174,6 +185,7 @@ print(f"Scorers: {[s.name if hasattr(s, 'name') else type(s).__name__ for s in s
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. Run `mlflow.genai.evaluate`
 # MAGIC
 # MAGIC 25 examples × 3 scorers = 75 LLM-judge calls. With a default Databricks judge that's ~2-3 min wall-clock. Results are logged to a new MLflow run with per-row Feedback objects visible in the Traces tab.
@@ -198,6 +210,7 @@ print(f"Metrics: {results_v1.metrics}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Inspect per-row results
 # MAGIC
 # MAGIC The `EvaluationResult` exposes a tables dict containing the per-row scores. Useful for inspecting failures and iterating.
@@ -212,6 +225,7 @@ for table_name, table_df in results_v1.tables.items():
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Iteration demo: a v2 predict_fn with a tighter prompt
 # MAGIC
 # MAGIC We can't easily swap the *agent's* system instructions without re-logging the model, so to demonstrate the iteration loop concisely we evaluate a **simpler email-drafting function** loaded from a registered prompt. Bumping the prompt to v2 and re-evaluating produces a parallel MLflow run we can compare against the agent's run.
@@ -330,6 +344,7 @@ with mlflow.start_run(run_name="prompt_only_eval_v2"):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 8. Compare v1 vs v2 metrics
 
 # COMMAND ----------
@@ -348,6 +363,7 @@ display(comparison)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just learned**

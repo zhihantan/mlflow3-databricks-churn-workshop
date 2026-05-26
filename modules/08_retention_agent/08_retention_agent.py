@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 08 — Retention Outreach Agent (`ResponsesAgent` + deploy)
+# MAGIC ### Author → log → register → deploy a tool-using agent in one notebook
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Author a `mlflow.pyfunc.ResponsesAgent` with two tools (Module 4 endpoint, Module 7 VS index), log it via Models-from-Code with `resources=[...]` for auto-auth, register in UC, then call `agents.deploy()` — one line that provisions a Model Serving endpoint + Review App + inference tables + tracing. The deepest Databricks-GenAI surface in the workshop.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC The most ambitious module in the workshop. We author a tool-using agent, log it, register it in Unity Catalog, and **actually deploy it** via `agents.deploy()` — getting a real Model Serving endpoint + Review App URL + inference table + tracing for free. The 8-12 min agent-endpoint cold-start is absorbed in-cell by exercising the local-loaded copy of the agent first.
 # MAGIC
@@ -50,6 +57,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Imports & config
 
 # COMMAND ----------
@@ -104,6 +112,7 @@ print(f"OPENAI_BASE_URL: {os.environ['OPENAI_BASE_URL']}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Build the customer-features lookup artifact
 # MAGIC
 # MAGIC The agent's `churn_score_tool` needs the features to POST to the churn endpoint. We can't run Spark inside a Model Serving endpoint, so we pre-bake a small JSON artifact mapping `customer_id → features_dict` and bundle it with the logged model. For the workshop we include only the top-200 highest-risk customers (Module 4's batch_predictions sorted by predicted_churn) to keep the artifact small (~50KB).
@@ -141,6 +150,7 @@ print(f"Sample customer: {list(features_lookup.keys())[0]}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Log the agent (Models-from-Code) — fast
 # MAGIC
 # MAGIC We pass `python_model=<path to agent.py>` so MLflow ingests the source file and uses `mlflow.models.set_model(...)` (at the bottom of `agent.py`) to identify the entry-point object.
@@ -208,6 +218,7 @@ print(f"Logged model_uri:     {logged.model_uri}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Register in Unity Catalog + kick off `agents.deploy()`
 # MAGIC
 # MAGIC `agents.deploy()` returns immediately with a deployment handle; the underlying Model Serving endpoint provisions in the background (~8-12 min for an agent endpoint with these dependencies). We grab the deployment handle, then move on to local testing while the cluster spins up.
@@ -245,6 +256,7 @@ print(f"\nProvisioning in background — we'll exercise the local copy while it 
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. Local test — load + invoke the agent in-process
 # MAGIC
 # MAGIC Fast iteration loop: load the logged agent via `mlflow.pyfunc.load_model(...)`, hit it with a sample request, see traces appear in the experiment. No endpoint, no deploy wait. This is the workflow you'd use during day-to-day development.
@@ -271,6 +283,7 @@ for item in local_response.get("output", []):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Run the agent on two more sample customers
 # MAGIC
 # MAGIC Confirms the tools generalize and shows the variety of outputs the model produces.
@@ -291,6 +304,7 @@ for cid in list(features_lookup.keys())[1:3]:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Wait for the deployed endpoint to be `READY`
 # MAGIC
 # MAGIC By now the agent endpoint has been provisioning for several minutes while we exercised the local copy. Poll until ready (or timeout — in which case Module 10 will pick up the work when the endpoint finishes).
@@ -321,6 +335,7 @@ while True:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 8. Query the deployed endpoint
 # MAGIC
 # MAGIC If the endpoint reached `READY`, send the same prompt we used locally to compare responses. If it timed out, this cell will surface the URL so participants can return to it once provisioning finishes.
@@ -350,6 +365,7 @@ except Exception as exc:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 9. Persist agent endpoint info for Modules 9 & 10
 
 # COMMAND ----------
@@ -378,6 +394,7 @@ display(spark.table(STATE_TABLE))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just built**

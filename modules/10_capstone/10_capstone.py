@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 10 — Capstone: Batch Score + Agent Drafted Outreach
+# MAGIC ### The full workshop in one notebook — every previous module composed
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Batch-score every customer via the Module 4 `@champion` endpoint, rank top-10 at-risk, invoke the deployed Module 8 retention agent on each to draft a personalized email, persist the results to Delta. No new APIs — this *is* the production retention pipeline, ready to be wrapped in a Databricks Job schedule.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC The full workshop in one notebook. We:
 # MAGIC
@@ -49,6 +56,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Imports & recover workshop state
 
 # COMMAND ----------
@@ -103,6 +111,7 @@ print(f"Review App URL: {agent_review_app_url}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Batch-score the customer snapshot via the champion model
 # MAGIC
 # MAGIC Same `models:/.../@champion` Spark UDF as Module 4 — we already have the predictions table, just refresh it to make sure we're scoring against the latest features.
@@ -132,6 +141,7 @@ display(
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Pick the top-10 highest-risk customers
 
 # COMMAND ----------
@@ -148,6 +158,7 @@ display(top_10)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Invoke the retention agent on each
 # MAGIC
 # MAGIC Prefer the deployed endpoint (the production path); fall back to the local-loaded agent if the endpoint isn't yet `READY` (Module 8 may have timed out waiting for cold-start).
@@ -249,6 +260,7 @@ for _, row in top_10.iterrows():
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. Display drafted outreach
 
 # COMMAND ----------
@@ -269,6 +281,7 @@ for r in results:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Persist the capstone results
 
 # COMMAND ----------
@@ -284,6 +297,7 @@ print(f"Saved to {FULL_SCHEMA}.capstone_retention_emails")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Productionization discussion
 # MAGIC
 # MAGIC What you'd add to ship this for real:
@@ -301,6 +315,7 @@ print(f"Saved to {FULL_SCHEMA}.capstone_retention_emails")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap — the full workshop
 # MAGIC
 # MAGIC In 10 modules you built:

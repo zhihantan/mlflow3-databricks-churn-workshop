@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 06 — Tracing & Prompt Registry Fundamentals
+# MAGIC ### Observability + version control for LLM calls — the GenAI foundation
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Enable `mlflow.openai.autolog()`, make a chat call against Databricks Foundation Model APIs, and every input/output/latency/token count is auto-captured as an MLflow Trace. Then register a `{{var}}`-templated prompt with an `@production` alias — every downstream module loads it by alias.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC Welcome to the **GenAI half** of the workshop. We start with two foundational MLflow 3 primitives that everything else builds on:
 # MAGIC
@@ -51,6 +58,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Imports & config
 
 # COMMAND ----------
@@ -76,6 +84,7 @@ print_config()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Kick off Vector Search endpoint creation (background)
 # MAGIC
 # MAGIC Provisioning a VS endpoint takes a few minutes; firing it here gives Module 7 a head start. Idempotent — skips if the endpoint already exists.
@@ -98,6 +107,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Enable tracing for the OpenAI client
 # MAGIC
 # MAGIC `mlflow.openai.autolog()` patches the OpenAI SDK so every `client.chat.completions.create(...)` (and several other methods) automatically produces an MLflow trace.
@@ -119,6 +129,7 @@ print(f"Tracing enabled. Traces will land in: {EXPERIMENT_PATH}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Build the OpenAI client targeting Databricks FMAPI
 # MAGIC
 # MAGIC The Databricks Foundation Model APIs are OpenAI-compatible — point a plain `openai.OpenAI` client at the workspace's `/serving-endpoints` URL and use the workspace API token. No extra packages required.
@@ -143,6 +154,7 @@ print(f"Default model: {CHAT_MODEL}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. First traced chat call
 # MAGIC
 # MAGIC A plain chat call. Open the experiment's **Traces** tab afterwards to see the captured span — inputs, output, model name, token counts, latency, all in one place.
@@ -164,6 +176,7 @@ print(f"\nTokens — prompt: {resp.usage.prompt_tokens}, completion: {resp.usage
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Add manual tracing for wrapper functions
 # MAGIC
 # MAGIC `@mlflow.trace` adds a named span around any Python function — useful when an LLM call sits inside a larger pipeline (retrieval, post-processing, etc.) and you want the trace tree to show those layers explicitly.
@@ -197,6 +210,7 @@ print(summary)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Register a prompt template in the Prompt Registry
 # MAGIC
 # MAGIC The Prompt Registry stores versioned prompt templates by name. Two big gotchas vs. MLflow 2 / vs. f-strings:
@@ -234,6 +248,7 @@ print(f"Registered prompt: {SUMMARY_PROMPT_NAME} version {prompt_v1.version}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 8. Set the `@production` alias
 
 # COMMAND ----------
@@ -249,6 +264,7 @@ print(f"Alias set: {SUMMARY_PROMPT_NAME}@production → version {prompt_v1.versi
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 9. Load by alias and use the prompt
 # MAGIC
 # MAGIC `mlflow.genai.load_prompt("prompts:/<name>@<alias>")` is the version-agnostic loader. Modules 7 and 8 will load this same prompt by alias so any future prompt iteration in Module 9 propagates without code changes.
@@ -281,6 +297,7 @@ print(resp2.choices[0].message.content)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 10. Verify everything by listing recent traces
 # MAGIC
 # MAGIC The experiment Traces tab is the UI view, but you can also query traces programmatically — useful for evaluation pipelines (Module 9).
@@ -305,6 +322,7 @@ if len(recent_traces):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just learned**

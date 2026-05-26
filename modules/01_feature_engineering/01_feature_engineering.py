@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 01 — Feature Engineering in Unity Catalog
+# MAGIC ### Build the leakage-free training set
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Turn the 5 raw Delta tables from Module 0 into a UC-governed, point-in-time-correct feature table. `FeatureEngineeringClient.create_table(timeseries_columns=...)` + `FeatureLookup(timestamp_lookup_key=...)` give you the leakage-free training set that Module 2 will train on.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC **Learning objectives**
 # MAGIC
@@ -32,6 +39,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Install pinned dependencies
 # MAGIC
 # MAGIC Same pins as Module 0 — `databricks-feature-engineering` 0.14+ for the current UC feature-table API.
@@ -46,6 +54,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Imports & workshop config
 
 # COMMAND ----------
@@ -77,6 +86,7 @@ print_config()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Compute features at the snapshot date
 # MAGIC
 # MAGIC We compute everything as a single Spark DataFrame keyed on `(customer_id, snapshot_date)`. The features split naturally into three groups:
@@ -204,6 +214,7 @@ display(features_df.limit(10))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Create the UC feature table
 # MAGIC
 # MAGIC `FeatureEngineeringClient.create_table` is the UC-native way to register a feature table. The crucial parameters:
@@ -252,6 +263,7 @@ print(f"Created UC feature table: {FEATURE_TABLE}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. Write the feature rows
 # MAGIC
 # MAGIC `mode='merge'` upserts by primary key, so re-running this cell is safe.
@@ -265,6 +277,7 @@ print(f"Wrote {written:,} feature rows to {FEATURE_TABLE}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Assemble the training set via point-in-time `FeatureLookup`
 # MAGIC
 # MAGIC `FeatureLookup(timestamp_lookup_key='snapshot_date')` tells the FE client: "for each row in the labels DataFrame, look up the feature row whose `snapshot_date` is the most recent value at or before the label's `snapshot_date`." With a single snapshot date in this workshop the lookup is degenerate (every label finds an exact-match feature row), but the *pattern* is what production point-in-time training requires — and it would scale unchanged if we logged daily snapshots.
@@ -309,6 +322,7 @@ display(training_df.limit(10))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Materialize a training view for Module 2
 # MAGIC
 # MAGIC Module 2 will train on this. We write it as a UC table so it survives notebook restarts.
@@ -326,6 +340,7 @@ print(f"Materialized training set at {TRAINING_TABLE}: {spark.table(TRAINING_TAB
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 8. Sanity-check the feature distribution
 # MAGIC
 # MAGIC A quick look at the most predictive features confirms the data has signal worth training on.
@@ -349,6 +364,7 @@ display(
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just built**

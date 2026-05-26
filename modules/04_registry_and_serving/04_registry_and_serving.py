@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 04 — UC Model Registry + Model Serving
+# MAGIC ### Promote a model to production — UC-governed, alias-routed, REST-callable
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Register the tuned LightGBM model in Unity Catalog under a three-part name, set `@champion` / `@challenger` aliases, kick off a Model Serving endpoint in the first cell (provisions in background ~5-7 min), and absorb the wait with productive batch-scoring work via `models:/<name>@champion`. By the end you have a REST endpoint your renewal pipeline can call at decision time.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC The runtime-critical module of the classic-ML track. Model Serving endpoint provisioning takes 5-10 minutes, so this notebook is structured to **kick the endpoint off early and absorb the wait with productive work** (registration, aliasing, batch scoring) — the *background-provisioning pattern* you'll see again in Module 8.
 # MAGIC
@@ -45,6 +52,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Imports & config
 
 # COMMAND ----------
@@ -69,6 +77,7 @@ print_config()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Recover the model_ids from workshop state
 
 # COMMAND ----------
@@ -89,6 +98,7 @@ print(f"Will register as:       {CHURN_MODEL_NAME}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2.5 Patch the logged models with the `lightgbm` dependency
 # MAGIC
 # MAGIC The `mlflow.sklearn.log_model()` calls in Modules 2 and 3 produced artifacts whose `requirements.txt` lists only `scikit-learn` — even though the wrapped Pipeline contains a `LGBMClassifier`. The sklearn flavor's dependency inference can't see transitive deps inside a Pipeline step. When the Model Serving container starts, `cloudpickle.load()` tries to `import lightgbm` and the container fails with:
@@ -154,6 +164,7 @@ print("\nState table updated with patched model_ids.")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Register both models in Unity Catalog
 # MAGIC
 # MAGIC `mlflow.set_registry_uri("databricks-uc")` switches the registry from the legacy workspace registry to Unity Catalog. The 3-part name format is `<catalog>.<schema>.<model>`.
@@ -183,6 +194,7 @@ print(f"Registered baseline LGBM as {CHURN_MODEL_NAME} version {baseline_version
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Set `@champion` / `@challenger` aliases
 # MAGIC
 # MAGIC Aliases are the MLflow 3 production-recommended way to refer to "the current production model" (vs. relying on numeric versions in downstream code).
@@ -213,6 +225,7 @@ for alias in ("champion", "challenger"):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. Kick off the serving endpoint (non-blocking)
 # MAGIC
 # MAGIC We use `serving_endpoints.create()` (returns immediately with a `Wait` handle) instead of `create_and_wait()` so the subsequent cells can do useful work while the endpoint provisions in the background.
@@ -270,6 +283,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Batch score via `models:/<name>@champion` (while endpoint provisions)
 # MAGIC
 # MAGIC Loading by alias keeps downstream code agnostic to model version bumps — when you promote a new version to `@champion`, every consumer using `models:/.../@champion` picks it up automatically.
@@ -299,6 +313,7 @@ display(
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Wait for the endpoint to be `READY`
 # MAGIC
 # MAGIC We block here until provisioning finishes. The `Wait` object's `.result(timeout=...)` polls under the hood. Typical cold-start for a small CPU model on a fresh endpoint: **~5-7 minutes**.
@@ -314,6 +329,7 @@ print(f"Endpoint state: ready={endpoint_detail.state.ready}, config_update={endp
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 8. Query the endpoint over REST
 # MAGIC
 # MAGIC Use the MLflow Deployments client — it handles auth and URL construction from the workspace context.
@@ -342,6 +358,7 @@ print(result)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 9. Persist endpoint name for downstream modules
 
 # COMMAND ----------
@@ -367,6 +384,7 @@ display(spark.table(STATE_TABLE))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just learned**

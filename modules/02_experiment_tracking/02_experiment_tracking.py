@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 02 — Experiment Tracking & the MLflow 3 `LoggedModel`
+# MAGIC ### The flagship MLflow 3 concept — models as first-class entities
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Train two churn classifiers and watch each one materialize as a `LoggedModel` with its own `model_id` and `models:/<model_id>` URI — decoupled from the run that produced it. Every downstream MLflow 3 API in this workshop (registry, evaluation, serving, agents) keys off that `model_id`.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC This is the **flagship MLflow 3 module** of the workshop. The biggest conceptual change between MLflow 2 and 3 is that **`LoggedModel` is now a first-class entity** — separate from any single run, with its own lifecycle, its own ID, and its own URI scheme (`models:/<model_id>`). Everything else in this workshop builds on that.
 # MAGIC
@@ -38,6 +45,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Install pinned dependencies
 # MAGIC
 # MAGIC MLflow 3.12 is critical here — DBR 17.3 LTS ML ships 3.0.1, which has `LoggedModel` but lacks several of the convenience APIs we use later.
@@ -53,6 +61,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Imports & workshop config
 
 # COMMAND ----------
@@ -76,6 +85,7 @@ print_config()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Set the MLflow experiment
 # MAGIC
 # MAGIC Per-user experiment under the workspace user folder so participants on a shared workspace don't trample each other's runs.
@@ -91,6 +101,7 @@ print(f"Experiment: {EXPERIMENT_PATH}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Load training data + train/test split
 # MAGIC
 # MAGIC The training set was materialized by Module 1 at `<schema>.churn_training_set`. We pull it into pandas (20k rows fits easily in memory) and split 80/20.
@@ -133,6 +144,7 @@ print(f"Train: {len(X_train):,} rows | Test: {len(X_test):,} rows | Churn rate (
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. Enable autologging
 # MAGIC
 # MAGIC In MLflow 3, `mlflow.autolog()` defaults `log_traces=True` (most relevant for GenAI; harmless for classic ML) and now produces a `LoggedModel` per training call instead of a run-scoped artifact. We still call explicit `log_model(...)` below to demonstrate the new `name=` parameter (which replaced `artifact_path=`).
@@ -146,6 +158,7 @@ mlflow.autolog(log_input_examples=True, log_model_signatures=True)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Train the logistic regression baseline → LoggedModel #1
 # MAGIC
 # MAGIC A sklearn `Pipeline` with one-hot for categoricals + standard-scaling for numerics + logistic regression. We name the LoggedModel `"logreg_baseline"` via the new `name=` kwarg.
@@ -195,6 +208,7 @@ print(f"LR test_auc    = {test_auc:.4f}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Train the LightGBM model → LoggedModel #2
 # MAGIC
 # MAGIC We wrap LightGBM in a sklearn `Pipeline` with a `OneHotEncoder` for the categorical
@@ -263,6 +277,7 @@ print(f"LGBM test_auc  = {test_auc_lgb:.4f}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 8. Inspect the new `LoggedModel` entity
 # MAGIC
 # MAGIC The killer feature of MLflow 3 is that each logged model has its own URI (`models:/<model_id>`) and its own page in the experiment UI — independent of the run that created it. You can attach metrics, parameters, datasets, and dependencies to a `LoggedModel` directly.
@@ -289,6 +304,7 @@ print(f"  creation_timestamp = {lgb_model_entity.creation_timestamp}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 9. Load by `models:/<model_id>` URI
 # MAGIC
 # MAGIC The new URI scheme replaces `runs:/<run_id>/<artifact_path>` from MLflow 2. The two forms below load the *same* model — but only the second one works in MLflow 3 if you didn't capture the run_id (and runs are no longer the unit of model identity).
@@ -307,6 +323,7 @@ print(preds)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 10. MLflow 2 → 3: the three biggest breaking changes to call out
 # MAGIC
 # MAGIC | # | Change | Why it matters |
@@ -320,6 +337,7 @@ print(preds)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 11. Pass the LightGBM `model_id` to Module 3
 # MAGIC
 # MAGIC Module 3 (tuning) needs to know which `LoggedModel` to reference as its baseline. We persist the model_id to a small "workshop state" Delta table so the handoff between notebooks is explicit and idempotent.
@@ -360,6 +378,7 @@ display(spark.table(STATE_TABLE))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just learned**

@@ -1,6 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Module 07 — RAG: "Why are customers churning?"
+# MAGIC ### Managed embeddings + Delta Sync — zero embed-pipeline plumbing
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC > **TL;DR** — Point Vector Search at the `support_tickets` Delta table and the `databricks-gte-large-en` embedding endpoint. Databricks runs the embed + sync pipeline; you call `similarity_search` and wrap it in a `@mlflow.trace`-decorated retrieve → augment → generate chain. Multilingual ticket retrieval with zero ops overhead.
+# MAGIC
+# MAGIC ---
 # MAGIC
 # MAGIC We build a retrieval-augmented chain over the synthetic support tickets from Module 0. The retriever is a Databricks Vector Search **Delta Sync** index with **managed embeddings** (`databricks-gte-large-en`), and the generator is a chat call against `databricks-claude-haiku-4-5`. Every layer is traced.
 # MAGIC
@@ -44,6 +51,7 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 1. Imports & config
 
 # COMMAND ----------
@@ -72,6 +80,7 @@ print_config()
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 2. Wait for the VS endpoint to be `ONLINE`
 # MAGIC
 # MAGIC Module 6 kicked this off. If you ran Modules 6 and 7 back-to-back the endpoint should be most of the way there; otherwise this will block for a few minutes.
@@ -104,6 +113,7 @@ while True:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 3. Create the Delta Sync index (managed embeddings)
 # MAGIC
 # MAGIC The key choice here is **managed embeddings** — we point at the source Delta table's text column (`description`) and the embedding model endpoint (`databricks-gte-large-en`), and Vector Search handles the embed-sync-store pipeline automatically. The alternative (Direct Access) requires us to compute embeddings and upsert them ourselves.
@@ -136,6 +146,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 4. Wait for the initial sync to complete
 # MAGIC
 # MAGIC On 500 tickets this is fast (~1 minute). The index isn't queryable until at least the first sync finishes.
@@ -160,6 +171,7 @@ while True:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 5. Test a similarity_search
 # MAGIC
 # MAGIC Verify retrieval works before we wire it into a chain. The query returns the top-k tickets along with cosine similarity scores.
@@ -182,6 +194,7 @@ for row in raw_results["result"]["data_array"]:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 6. Register the RAG prompt template
 # MAGIC
 # MAGIC Distinct from Module 6's customer-specific summary prompt — this one is for open-ended "what's going on?" questions over the ticket corpus.
@@ -223,6 +236,7 @@ print(f"Registered {RAG_PROMPT_NAME} v{prompt.version} → @production")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 7. Build the traced RAG chain
 # MAGIC
 # MAGIC Three layers: `retrieve` (a `RETRIEVER` span), `format_context` (a plain function call, also traced), and `generate` (LLM call, auto-traced by openai.autolog). Wrapped in a top-level `CHAIN` span.
@@ -274,6 +288,7 @@ def churn_rag_qa(question: str, k: int = 5) -> dict:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 8. Run the chain on a few questions
 
 # COMMAND ----------
@@ -291,6 +306,7 @@ for question in [
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## 9. View the trace tree
 # MAGIC
 # MAGIC Open the experiment's **Traces** tab to see the full hierarchy: `churn_rag_qa` → `retrieve_tickets` → `format_context` → the LLM call. This is exactly what you want when debugging RAG quality issues — you can see which tickets came back, what the augmented prompt looked like, and what the LLM did with it.
@@ -328,6 +344,7 @@ except Exception as exc:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just built**
