@@ -29,7 +29,7 @@ The repo is cloned into a Databricks workspace via Git folders and every noteboo
 | Decision | Choice | One-line rationale |
 |---|---|---|
 | MLflow version | **3.12.0** (pinned floor `mlflow[databricks]>=3.12`) | DBR 17.3 LTS ML ships 3.0.1 only; need 3.12 for current `mlflow.genai` surface and predefined scorers |
-| Runtime | **DBR 17.3 LTS ML** (classic fallback) + Serverless ML (Beta) base env | Current LTS; ships sklearn 1.6.1 / LightGBM 4.6.0 / XGBoost 3.0.0 / Optuna 3.6.1 — see [release notes](https://docs.databricks.com/aws/en/release-notes/runtime/17.3lts-ml) |
+| Runtime | **DBR 17.3 LTS ML** (classic fallback) + Serverless base env | Current LTS; ships sklearn 1.6.1 / LightGBM 4.6.0 / XGBoost 3.0.0 / Optuna 3.6.1 — see [release notes](https://docs.databricks.com/aws/en/release-notes/runtime/17.3lts-ml) |
 | Chat model (FMAPI) | **`databricks-claude-haiku-4-5`** (primary) with `databricks-meta-llama-3-3-70b-instruct` as fallback | GA pay-per-token, fast + cheap → keeps GenAI modules under budget; Llama 3.3 70B is a no-preview-risk fallback |
 | Embedding model | **`databricks-gte-large-en`** | GA, paired with managed Delta Sync indexes in current docs |
 | Vector Search index | **Delta Sync, `TRIGGERED`, managed embeddings** | Cheapest provisioning, sub-minute sync on ~500 rows |
@@ -469,7 +469,7 @@ Locked answers preserved here for traceability:
 - Lakehouse Monitoring new `WorkspaceClient.data_quality` vs legacy `databricks.lakehouse_monitoring` — pick exactly one and stick to it
 - `agents.deploy()` full signature
 - OpenAI Agents SDK package name (`openai-agents` vs `agents`) and import path
-- Whether DBR Serverless ML (Beta) has the MLflow 3.12 features or only DBR 17.3 ML LTS does
+- Whether DBR Serverless has the MLflow 3.12 features or only DBR 17.3 ML LTS does
 
 ---
 

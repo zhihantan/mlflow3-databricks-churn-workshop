@@ -81,7 +81,7 @@ These are points where my research left an open question that can only be conclu
 
 ### Low priority — observed-only
 
-10. **MLflow 3.12 on Serverless ML (Beta) base env.**
+10. **MLflow 3.12 on Serverless base env.**
     - All notebooks `%pip install "mlflow[databricks]>=3.12,<4"` and restart Python. The upgrade should succeed on both DBR 17.3 LTS ML and Serverless ML, but I haven't dry-run on Serverless ML specifically.
 
 11. **`databricks.vector_search.client.VectorSearchClient().list_indexes(name=...)` return shape** (Module 7).

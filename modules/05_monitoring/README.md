@@ -16,7 +16,7 @@ This module uses a **simulated** inference table (locked Q6) rather than wiring 
 - Modules 0, 1, 4 have been run (we reuse the registered model name to tag inference rows with a `model_id`).
 
 **Runtime target**: ~4 minutes.
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`05_monitoring.py`](./05_monitoring.py)
 

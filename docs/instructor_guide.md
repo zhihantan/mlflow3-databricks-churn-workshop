@@ -9,7 +9,7 @@ Practical notes for facilitators running this workshop live. Read in conjunction
 **One week before**
 - [ ] Confirm the workspace has UC enabled, FMAPI enabled, and Vector Search enabled.
 - [ ] Confirm each participant has been granted (a) read on the metastore, (b) `CREATE CATALOG` OR an admin has pre-created `bolttech_workshop`, (c) `CREATE SCHEMA` on `bolttech_workshop`, (d) ability to create serving endpoints and VS endpoints.
-- [ ] Decide on compute: Serverless ML (Beta) preferred for fast start; classic DBR 17.3 LTS ML cluster as fallback. If using classic, provision a cluster per participant or a shared cluster with sufficient capacity (recommend Standard_DS4_v2 / m5.xlarge minimum).
+- [ ] Decide on compute: Serverless preferred for fast start; classic DBR 17.3 LTS ML cluster as fallback. If using classic, provision a cluster per participant or a shared cluster with sufficient capacity (recommend Standard_DS4_v2 / m5.xlarge minimum).
 - [ ] Skim `VERIFICATION.md` §3 — the flagged items — and decide whether you want to live-verify any of them before the session.
 - [ ] If group > 10 participants on a single workspace, plan for FMAPI rate-limit contention. Module 9 makes ~75 judge calls × N participants concurrently — at 10 participants you're at ~750 calls in a few minutes, well within the 20K OTPM limit, but stagger Module 9 start times if you go higher.
 

@@ -31,7 +31,7 @@
 # MAGIC
 # MAGIC **Expected runtime**: ~6-8 minutes (VS endpoint wait + index sync are the dominant costs).
 # MAGIC
-# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+# MAGIC **Compute**: Serverless or DBR 17.3 LTS ML.
 
 # COMMAND ----------
 

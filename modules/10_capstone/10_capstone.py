@@ -32,7 +32,7 @@
 # MAGIC
 # MAGIC **Expected runtime**: ~3-5 minutes (10 agent calls × ~5-10s each).
 # MAGIC
-# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+# MAGIC **Compute**: Serverless or DBR 17.3 LTS ML.
 
 # COMMAND ----------
 

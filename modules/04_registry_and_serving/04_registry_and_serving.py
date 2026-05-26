@@ -32,7 +32,7 @@
 # MAGIC
 # MAGIC **Expected runtime**: ~7-8 minutes (endpoint cold-start dominates; other work fills the wait).
 # MAGIC
-# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+# MAGIC **Compute**: Serverless or DBR 17.3 LTS ML.
 
 # COMMAND ----------
 

@@ -12,7 +12,7 @@ Build a UC feature table with point-in-time correctness for the churn label, usi
 - Module 0 (synthetic data) has been run.
 
 **Runtime target**: ~4 minutes.
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`01_feature_engineering.py`](./01_feature_engineering.py)
 

@@ -28,7 +28,7 @@
 # MAGIC
 # MAGIC **Expected runtime**: ~5 minutes (15 Optuna trials × ~10s + eval).
 # MAGIC
-# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+# MAGIC **Compute**: Serverless or DBR 17.3 LTS ML.
 
 # COMMAND ----------
 

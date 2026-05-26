@@ -43,7 +43,7 @@ flowchart LR
 A workspace and a few permissions:
 
 - [ ] **Databricks workspace** with Unity Catalog enabled (AWS, Azure, or GCP).
-- [ ] **Databricks Runtime** — Serverless ML (Beta) base environment is the primary target; **DBR 17.3 LTS ML** is the validated classic-cluster fallback.
+- [ ] **Databricks Runtime** — Serverless base environment is the primary target; **DBR 17.3 LTS ML** is the validated classic-cluster fallback.
 - [ ] **Foundation Model APIs** enabled (pay-per-token). The workshop uses `databricks-claude-haiku-4-5` and `databricks-gte-large-en`.
 - [ ] **Vector Search** enabled (Modules 6 & 7).
 - [ ] **Permissions:**
@@ -61,7 +61,7 @@ A workspace and a few permissions:
    In your workspace → **Repos** → **Add repo** → paste the git URL of this repo. It lands at `/Workspace/Users/<your-email>/mlflow3-databricks-churn-workshop`.
 
 2. **Open the setup notebook.**
-   `setup/00_setup_and_synthetic_data.py`. Attach to **Serverless ML (Beta)** or a **DBR 17.3 LTS ML** cluster. Run all cells (Run → Run All, or Ctrl+Shift+Enter cell by cell).
+   `setup/00_setup_and_synthetic_data.py`. Attach to **Serverless** or a **DBR 17.3 LTS ML** cluster. Run all cells (Run → Run All, or Ctrl+Shift+Enter cell by cell).
 
 3. **Walk through the modules in order.**
    `modules/01_feature_engineering` → `modules/02_experiment_tracking` → … → `modules/10_capstone`. Each module's `README.md` lists prerequisites and expected runtime. Run all cells in each notebook.

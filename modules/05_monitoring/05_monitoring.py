@@ -35,7 +35,7 @@
 # MAGIC
 # MAGIC **Expected runtime**: ~2-3 minutes (everything runs synchronously; no async monitor refresh to wait for).
 # MAGIC
-# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML. `scipy` is preinstalled on both.
+# MAGIC **Compute**: Serverless or DBR 17.3 LTS ML. `scipy` is preinstalled on both.
 
 # COMMAND ----------
 

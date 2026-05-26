@@ -104,6 +104,6 @@ Tracked in `VERIFICATION.md`:
 - Pick **one** of `WorkspaceClient.data_quality` vs `databricks.lakehouse_monitoring` and stick to it
 - `agents.deploy()` full signature (tags, env vars, workload size)
 - OpenAI Agents SDK pip name + import path (`openai-agents` vs `agents`)
-- MLflow 3.12 features on Serverless ML (Beta) base env vs DBR 17.3 LTS ML only
+- MLflow 3.12 features on Serverless base env vs DBR 17.3 LTS ML only
 
 This log is appended to throughout the build — new URLs land here with a date as they're consulted.

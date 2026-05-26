@@ -14,7 +14,7 @@ Register the Module 3 tuned LightGBM model in Unity Catalog under a three-part n
 - Modules 0, 1, 2, 3 have been run.
 
 **Runtime target**: ~8 minutes (endpoint cold-start ~5-7 min absorbed by parallel work).
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`04_registry_and_serving.py`](./04_registry_and_serving.py)
 

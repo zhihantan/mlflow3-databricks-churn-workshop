@@ -14,7 +14,7 @@ This module introduces no new APIs — it stitches together everything Modules 0
 - Modules 4 and 8 have been run, and both their serving endpoints are in the `READY` state.
 
 **Runtime target**: ~5 minutes.
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`10_capstone.py`](./10_capstone.py)
 

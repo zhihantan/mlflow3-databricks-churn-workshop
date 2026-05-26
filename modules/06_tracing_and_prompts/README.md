@@ -17,7 +17,7 @@ This module kicks off **Vector Search endpoint provisioning** in cell 1 (backgro
 - Module 0 (the workshop catalog + schema must exist).
 
 **Runtime target**: ~3 minutes.
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`06_tracing_and_prompts.py`](./06_tracing_and_prompts.py)
 

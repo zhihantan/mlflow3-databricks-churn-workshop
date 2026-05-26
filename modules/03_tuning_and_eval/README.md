@@ -13,7 +13,7 @@ Tune the Module 2 LightGBM classifier with Optuna (15 trials), then evaluate the
 - Modules 0, 1, 2 have been run.
 
 **Runtime target**: ~6 minutes (15 Optuna trials × ~10s each + final eval).
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`03_tuning_and_eval.py`](./03_tuning_and_eval.py)
 

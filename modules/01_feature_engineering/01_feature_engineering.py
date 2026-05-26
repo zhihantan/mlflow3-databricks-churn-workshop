@@ -27,7 +27,7 @@
 # MAGIC
 # MAGIC **Expected runtime**: ~3-4 minutes (dominated by the feature table create + write).
 # MAGIC
-# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+# MAGIC **Compute**: Serverless or DBR 17.3 LTS ML.
 
 # COMMAND ----------
 

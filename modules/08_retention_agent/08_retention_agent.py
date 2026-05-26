@@ -34,7 +34,7 @@
 # MAGIC
 # MAGIC **Expected runtime**: ~9 minutes (background-provisioning pattern absorbs the agent endpoint cold-start).
 # MAGIC
-# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+# MAGIC **Compute**: Serverless or DBR 17.3 LTS ML.
 
 # COMMAND ----------
 

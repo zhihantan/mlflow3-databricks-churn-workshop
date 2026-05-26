@@ -14,7 +14,7 @@
 # MAGIC
 # MAGIC - A Databricks workspace with **Unity Catalog enabled**.
 # MAGIC - Permissions: `CREATE CATALOG` on the metastore (if creating `bolttech_workshop` for the first time) OR `USE CATALOG bolttech_workshop` + `CREATE SCHEMA` on the catalog (if it already exists).
-# MAGIC - **Compute:** Serverless ML (Beta) base environment, OR a classic cluster running **Databricks Runtime 17.3 LTS ML**.
+# MAGIC - **Compute:** Serverless base environment, OR a classic cluster running **Databricks Runtime 17.3 LTS ML**.
 # MAGIC
 # MAGIC **Expected runtime**: ~2-3 minutes (20k customers + supporting tables generated in pandas, written to Delta as a single Spark write per table).
 # MAGIC

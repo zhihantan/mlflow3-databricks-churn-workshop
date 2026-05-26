@@ -14,7 +14,7 @@ Build a Delta Sync Vector Search index over the synthetic support tickets with m
 - Modules 0, 6 have been run (Module 6 already kicked off the VS endpoint provisioning).
 
 **Runtime target**: ~8 minutes (VS endpoint pre-provisioned by Module 6; index sync on ~500 rows is fast).
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`07_rag_churn_insights.py`](./07_rag_churn_insights.py)
 

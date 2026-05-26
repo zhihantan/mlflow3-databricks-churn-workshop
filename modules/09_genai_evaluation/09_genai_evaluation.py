@@ -34,7 +34,7 @@
 # MAGIC
 # MAGIC **Expected runtime**: ~5-6 minutes (25 examples × ~3 scorer judgments per example).
 # MAGIC
-# MAGIC **Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+# MAGIC **Compute**: Serverless or DBR 17.3 LTS ML.
 
 # COMMAND ----------
 

@@ -16,7 +16,7 @@ This is the **flagship MLflow 3 pedagogy module** — it's where the difference 
 - Modules 0, 1 have been run.
 
 **Runtime target**: ~6 minutes.
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`02_experiment_tracking.py`](./02_experiment_tracking.py)
 

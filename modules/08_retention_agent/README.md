@@ -24,7 +24,7 @@ This is the **most ambitious runtime module** — locked Q3 directs us to do a r
 - Modules 0, 4, 6, 7 have all been run. (Module 4's serving endpoint and Module 7's VS index must be ready.)
 
 **Runtime target**: ~9 minutes (raised from 5 → 9 per locked Q3).
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`08_retention_agent.py`](./08_retention_agent.py)
 

@@ -24,7 +24,7 @@ This module uses the **locally-loaded** agent (not the deployed endpoint) so the
 - Modules 6, 7, 8 have been run.
 
 **Runtime target**: ~6 minutes (25 examples × ~4 scorers ≈ 100 judge calls; warn about FMAPI OTPM on shared workspaces).
-**Compute**: Serverless ML (Beta) or DBR 17.3 LTS ML.
+**Compute**: Serverless or DBR 17.3 LTS ML.
 
 **Notebook**: [`09_genai_evaluation.py`](./09_genai_evaluation.py)
 
