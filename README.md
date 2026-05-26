@@ -77,14 +77,15 @@ Two paths — pick one based on how you want to consume the workshop:
 
 ### B) Deploy the end-to-end validation Job from a notebook (no local CLI required)
 
-After cloning the repo into your workspace via Git folders, open [`scripts/deploy_workshop_job.py`](./scripts/deploy_workshop_job.py) and Run All. It will:
+After cloning the repo into your workspace via Git folders, open [`scripts/deploy_workshop_job.py`](./scripts/deploy_workshop_job.py) and Run All. It uses the **Databricks Python SDK** (not the CLI — which is restricted on Serverless `%sh`) to:
 
-1. Export workspace creds from the notebook's `dbutils` context as env vars (`DATABRICKS_HOST` / `DATABRICKS_TOKEN`) so the CLI auto-authenticates.
-2. Install the Databricks CLI (the v0.205+ Go binary that supports bundles) if it isn't already on PATH.
-3. Run `bundle validate` → `bundle deploy --target dev` → `bundle summary` — creating the `[dev <your-user>] MLFlow Workshop e2e job` in Workflows.
-4. (Optional cell) Trigger a run with `--no-wait` so the chained 10-task Job starts immediately; you monitor in the Workflows UI.
+1. Resolve the workspace path of the cloned repo from `dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath()`.
+2. Build a 10-task Job spec mirroring `resources/workshop_e2e_job.yml`, with notebook tasks pointing at your actual Git-folder paths.
+3. **Idempotently create-or-update** the `MLFlow Workshop e2e job` (looks up by name; updates in place if it exists). Safe to re-run after pulling repo changes.
+4. Print the Job URL so you can monitor in the Workflows UI.
+5. (Optional cell) Trigger a run via `w.jobs.run_now(...)` — returns immediately with the run URL while the chained 10-task Job executes in the background.
 
-This is the **fastest path** for customer demos because the user never has to leave the Databricks UI.
+This is the **fastest path** for customer demos because the user never has to leave the Databricks UI or install anything locally. Uses workspace auth automatically; no env vars or `databricks auth login` step.
 
 ### C) Deploy the e2e validation Job from your local terminal
 
