@@ -75,9 +75,20 @@ Two paths — pick one based on how you want to consume the workshop:
 
 > Notebooks read identifiers from `config/workshop_config.py` — **don't edit catalog or table names inside the notebooks.** If you want to change the catalog name, edit `config/workshop_config.py` once.
 
-### B) Deploy the end-to-end validation Job (Databricks Asset Bundle)
+### B) Deploy the end-to-end validation Job from a notebook (no local CLI required)
 
-A bundle ships with this repo (`databricks.yml` + `resources/workshop_e2e_job.yml`) that creates a Databricks Job chaining all 10 modules in dependency order. Use this when you want a single **Run now** button to validate the whole workshop, demo to a customer, or wire into CI.
+After cloning the repo into your workspace via Git folders, open [`scripts/deploy_workshop_job.py`](./scripts/deploy_workshop_job.py) and Run All. It will:
+
+1. Export workspace creds from the notebook's `dbutils` context as env vars (`DATABRICKS_HOST` / `DATABRICKS_TOKEN`) so the CLI auto-authenticates.
+2. Install the Databricks CLI (the v0.205+ Go binary that supports bundles) if it isn't already on PATH.
+3. Run `bundle validate` → `bundle deploy --target dev` → `bundle summary` — creating the `[dev <your-user>] MLFlow Workshop e2e job` in Workflows.
+4. (Optional cell) Trigger a run with `--no-wait` so the chained 10-task Job starts immediately; you monitor in the Workflows UI.
+
+This is the **fastest path** for customer demos because the user never has to leave the Databricks UI.
+
+### C) Deploy the e2e validation Job from your local terminal
+
+Same bundle as Option B, but driven from your own machine — useful for CI / repeatable team deployments.
 
 ```bash
 # One-time: install/update the Databricks CLI
@@ -91,7 +102,7 @@ databricks bundle deploy --target dev     # syncs notebooks + creates the Job
 databricks bundle run workshop_e2e        # triggers a run; CLI tails progress
 ```
 
-After `deploy`, the Job appears in the **Workflows** UI as **`[dev <your-user>] MLFlow Workshop e2e job`**. Click **Run now** there if you'd rather trigger from the UI than the CLI. Expected wall-clock: **~40-60 min** (M4 endpoint cold-start + M8 `agents.deploy()` dominate). Bundle setup details + tear-down (`databricks bundle destroy --target dev`) are in [`databricks.yml`](./databricks.yml).
+After `deploy` (B or C), the Job appears in the **Workflows** UI as **`[dev <your-user>] MLFlow Workshop e2e job`**. Click **Run now** there if you'd rather trigger from the UI than the CLI. Expected wall-clock: **~40-60 min** (M4 endpoint cold-start + M8 `agents.deploy()` dominate). Bundle setup details + tear-down (`databricks bundle destroy --target dev`) are in [`databricks.yml`](./databricks.yml).
 
 ---
 
@@ -182,7 +193,8 @@ mlflow3-databricks-churn-workshop/
 │   ├── instructor_guide.md  # Pacing notes for facilitators
 │   └── research_log.md      # Citation appendix
 └── scripts/
-    └── reset_workshop.py    # Tear down for a clean re-run
+    ├── deploy_workshop_job.py  # In-workspace notebook — deploys bundle + Job (Quickstart B)
+    └── reset_workshop.py       # Tear down catalog/schema/endpoints for a clean re-run
 ```
 
 ---
