@@ -1,0 +1,49 @@
+# Databricks Asset Bundle for the MLflow 3 + Databricks Churn Workshop.
+#
+# This bundle ships an end-to-end validation Job that runs all 10 workshop
+# modules in dependency order on Serverless compute. Use it to:
+#   - Validate every notebook still works after pulling repo changes.
+#   - Hand customers a single "Run now" button instead of asking them to step
+#     through 10 notebooks manually.
+#
+# Quickstart (after cloning this repo):
+#   1. Install / update the Databricks CLI: https://docs.databricks.com/aws/en/dev-tools/cli/install
+#   2. Configure auth:        databricks auth login --host <your-workspace-url>
+#   3. Validate the bundle:   databricks bundle validate
+#   4. Deploy the resources:  databricks bundle deploy --target dev
+#   5. Run the e2e job:       databricks bundle run workshop_e2e
+#
+# What gets deployed:
+#   - All workshop notebooks + config are synced to your workspace under
+#     /Workspace/Users/<you>/.bundle/mlflow3-workshop/files/...
+#   - One Job named "MLFlow Workshop e2e job [dev <you>]" with 10 chained
+#     notebook tasks running on Serverless compute.
+#
+# Tear down: databricks bundle destroy --target dev
+#
+# Refs:
+#   https://docs.databricks.com/aws/en/dev-tools/bundles/
+#   https://docs.databricks.com/aws/en/dev-tools/bundles/resources
+
+bundle:
+  name: mlflow3-workshop
+
+# Pull in every resource definition file under resources/
+include:
+  - resources/*.yml
+
+# Workspace settings + targets ------------------------------------------------
+# `dev` is the only target out of the box. Add `staging` / `prod` blocks of the
+# same shape if you want a promotion path. `mode: development` makes resources
+# prefix with `[dev <user>]` so multiple developers can deploy to the same
+# workspace without colliding.
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      # `host` is auto-resolved from `databricks auth login` / your active profile.
+      # Uncomment + hardcode if you want to lock this bundle to one workspace.
+      # host: https://<your-workspace>.cloud.databricks.com
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

@@ -1,0 +1,100 @@
+# MLflow Workshop end-to-end validation Job.
+#
+# Runs all 10 module notebooks in dependency order on Serverless notebook compute.
+# Total expected runtime: ~40-60 min depending on M4 / M8 endpoint cold-start.
+#
+# Deploy: `databricks bundle deploy --target dev`
+# Run:    `databricks bundle run workshop_e2e`
+# UI:     after deploy, find under Workflows → "MLFlow Workshop e2e job [dev <you>]"
+
+resources:
+  jobs:
+    workshop_e2e:
+      name: MLFlow Workshop e2e job
+
+      tags:
+        purpose: mlflow3-workshop-end-to-end-validation
+        bundle: mlflow3-workshop
+
+      # Sequential reruns of the same job (e.g., after a fix) shouldn't trample
+      # a still-running one. The M8 deploy step in particular doesn't tolerate
+      # concurrent reprovisioning.
+      max_concurrent_runs: 1
+
+      # When the chain finishes (success OR failure), email a summary if
+      # notification_settings are configured. Off by default — uncomment and
+      # add an email address if you want it.
+      # email_notifications:
+      #   on_success: [your-email@databricks.com]
+      #   on_failure: [your-email@databricks.com]
+
+      # Tasks ---------------------------------------------------------------
+      # Each task is a notebook_task referencing a path in the bundle (relative
+      # paths are resolved against the file containing this YAML, then mapped
+      # to the workspace location DAB syncs to at deploy time).
+      #
+      # No `job_cluster_key` / `new_cluster` — omitting cluster config makes
+      # the task run on Serverless notebook compute, which is what the workshop
+      # was authored against and what the user's workspace mandates.
+
+      tasks:
+        - task_key: module_01_feature_engineering
+          notebook_task:
+            notebook_path: ../modules/01_feature_engineering/01_feature_engineering.py
+
+        - task_key: module_02_experiment_tracking
+          depends_on:
+            - task_key: module_01_feature_engineering
+          notebook_task:
+            notebook_path: ../modules/02_experiment_tracking/02_experiment_tracking.py
+
+        - task_key: module_03_tuning_and_eval
+          depends_on:
+            - task_key: module_02_experiment_tracking
+          notebook_task:
+            notebook_path: ../modules/03_tuning_and_eval/03_tuning_and_eval.py
+
+        - task_key: module_04_registry_and_serving
+          depends_on:
+            - task_key: module_03_tuning_and_eval
+          notebook_task:
+            notebook_path: ../modules/04_registry_and_serving/04_registry_and_serving.py
+
+        - task_key: module_05_monitoring
+          depends_on:
+            - task_key: module_04_registry_and_serving
+          notebook_task:
+            notebook_path: ../modules/05_monitoring/05_monitoring.py
+
+        - task_key: module_06_tracing_and_prompts
+          depends_on:
+            - task_key: module_05_monitoring
+          notebook_task:
+            notebook_path: ../modules/06_tracing_and_prompts/06_tracing_and_prompts.py
+
+        - task_key: module_07_rag_churn_insights
+          depends_on:
+            - task_key: module_06_tracing_and_prompts
+          notebook_task:
+            notebook_path: ../modules/07_rag_churn_insights/07_rag_churn_insights.py
+
+        # M8 is the longest task — agents.deploy() provisions the agent endpoint
+        # which can take 8-12 min cold-start. 30-min timeout gives generous headroom.
+        - task_key: module_08_retention_agent
+          depends_on:
+            - task_key: module_07_rag_churn_insights
+          timeout_seconds: 1800
+          notebook_task:
+            notebook_path: ../modules/08_retention_agent/08_retention_agent.py
+
+        - task_key: module_09_genai_evaluation
+          depends_on:
+            - task_key: module_08_retention_agent
+          notebook_task:
+            notebook_path: ../modules/09_genai_evaluation/09_genai_evaluation.py
+
+        - task_key: module_10_capstone
+          depends_on:
+            - task_key: module_09_genai_evaluation
+          notebook_task:
+            notebook_path: ../modules/10_capstone/10_capstone.py
