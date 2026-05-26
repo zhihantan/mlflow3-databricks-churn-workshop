@@ -57,6 +57,10 @@ A workspace and a few permissions:
 
 ## Quickstart
 
+Two paths — pick one based on how you want to consume the workshop:
+
+### A) Interactive walk-through (default — participant / workshop format)
+
 1. **Clone the repo into Databricks.**
    In your workspace → **Repos** → **Add repo** → paste the git URL of this repo. It lands at `/Workspace/Users/<your-email>/mlflow3-databricks-churn-workshop`.
 
@@ -70,6 +74,24 @@ A workspace and a few permissions:
    When you're done playing, run `scripts/reset_workshop.py` to tear down catalog/schema/endpoints/indexes/registered models so you can re-run from scratch.
 
 > Notebooks read identifiers from `config/workshop_config.py` — **don't edit catalog or table names inside the notebooks.** If you want to change the catalog name, edit `config/workshop_config.py` once.
+
+### B) Deploy the end-to-end validation Job (Databricks Asset Bundle)
+
+A bundle ships with this repo (`databricks.yml` + `resources/workshop_e2e_job.yml`) that creates a Databricks Job chaining all 10 modules in dependency order. Use this when you want a single **Run now** button to validate the whole workshop, demo to a customer, or wire into CI.
+
+```bash
+# One-time: install/update the Databricks CLI
+# https://docs.databricks.com/aws/en/dev-tools/cli/install
+
+databricks auth login --host https://<your-workspace>.cloud.databricks.com
+
+# From the repo root:
+databricks bundle validate                # sanity-check the bundle
+databricks bundle deploy --target dev     # syncs notebooks + creates the Job
+databricks bundle run workshop_e2e        # triggers a run; CLI tails progress
+```
+
+After `deploy`, the Job appears in the **Workflows** UI as **`[dev <your-user>] MLFlow Workshop e2e job`**. Click **Run now** there if you'd rather trigger from the UI than the CLI. Expected wall-clock: **~40-60 min** (M4 endpoint cold-start + M8 `agents.deploy()` dominate). Bundle setup details + tear-down (`databricks bundle destroy --target dev`) are in [`databricks.yml`](./databricks.yml).
 
 ---
 
@@ -137,6 +159,9 @@ mlflow3-databricks-churn-workshop/
 ├── LICENSE                  # Apache 2.0
 ├── CONTRIBUTING.md          # How to contribute back
 ├── requirements.txt         # Pinned versions (also %pip installed inside each notebook)
+├── databricks.yml           # Databricks Asset Bundle entry point (Quickstart B)
+├── resources/
+│   └── workshop_e2e_job.yml # Multi-task Job resource — chains M1 → M10 on Serverless
 ├── config/
 │   └── workshop_config.py   # Single source of truth — catalog/schema/endpoint names
 ├── setup/
