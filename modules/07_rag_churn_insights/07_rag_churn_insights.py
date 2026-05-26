@@ -13,6 +13,18 @@
 # MAGIC - Run a `similarity_search` and inspect the structured results.
 # MAGIC - Assemble a traced RAG chain (retrieve → augment → generate) and answer churn-driver questions.
 # MAGIC
+# MAGIC **Databricks features showcased**
+# MAGIC
+# MAGIC - **Databricks Vector Search Delta Sync index** — point the index at a Delta table column (`description`) and the embedding model (`databricks-gte-large-en`); Databricks runs the embedding + indexing pipeline. New rows in the source table flow into the index automatically on `pipeline_type='TRIGGERED'` or `'CONTINUOUS'`. No bespoke embedding worker, no separate vector DB, no cron job to keep things in sync.
+# MAGIC - **Managed embeddings via FMAPI** — `embedding_model_endpoint_name='databricks-gte-large-en'` means Vector Search calls the Databricks-hosted embedding model directly; you never see a vector, never write embed code. (Compare to: spin up an embedding service, manage GPU quotas, handle retries, monitor latency, version the model — all gone.)
+# MAGIC - **Delta + Change Data Feed as the source-of-truth pattern** — the same `support_tickets` Delta table is the source for analytics dashboards, RAG retrieval, training labels, and lineage tracking. One copy, governed by Unity Catalog.
+# MAGIC - **Hybrid retrieval + structured filtering** — `similarity_search(filters={"customer_id": cust})` combines semantic search with structured predicates. The agent in M8 uses exactly this pattern to scope retrieval to one customer.
+# MAGIC - **`@mlflow.trace(span_type=SpanType.RETRIEVER)`** — explicit retriever span makes the trace tree show the RAG structure (retrieve → parse → generate) instead of one flat LLM call. This is the diff between "the chain returned a bad answer" and "the retriever pulled the wrong tickets, so the LLM had no chance."
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC bolttech's support tickets span ~14 languages and reference policy IDs, claim numbers, device serials, regional payment processors, and country-specific regulatory terms. A keyword-only search misses semantic matches ("payment kept bouncing" vs "transaction declined" vs "couldn't process my card"); a separate vector DB outside Unity Catalog breaks the lineage between tickets, policies, and CRM data. Vector Search with managed embeddings keeps the corpus in Delta (one copy), governed by UC (compliance team can audit who queried what), and queryable with both semantic + structured filters (find tickets *for this customer* matching *this churn pattern*).
+# MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
 # MAGIC - Modules 0 and 6 have been run. (Module 6 kicked off the VS endpoint provisioning, which should be ready or close to ready by now.)
@@ -324,6 +336,20 @@ except Exception as exc:
 # MAGIC - A traced RAG chain with clean `RETRIEVER` / `PARSER` / `CHAIN` spans surfaced in the MLflow Traces UI.
 # MAGIC - A registered, aliased RAG prompt that Modules 8 and 9 will load by `@production`.
 # MAGIC
+# MAGIC **What you'd build without Databricks**
+# MAGIC
+# MAGIC | Concern | DIY stack | Databricks-native |
+# MAGIC | --- | --- | --- |
+# MAGIC | Embedding model hosting | Self-hosted SentenceTransformers + GPU autoscaling, or third-party API + key vault | FMAPI `databricks-gte-large-en` — one endpoint name, no infra to manage |
+# MAGIC | Vector DB | Pinecone / Weaviate / Qdrant — separate account, separate billing, separate governance | Vector Search inside the same UC catalog as the source Delta table |
+# MAGIC | Source-to-index sync | Custom worker reading from Kafka/CDC + retry logic + dead-letter queues | Delta Sync index — declarative; Databricks does the embed pipeline |
+# MAGIC | Multi-language support | Manage one embedding model per language OR build a translation pipeline | `databricks-gte-large-en` is multilingual; one index covers SG/MY/ID/TH/JP/etc out of the box |
+# MAGIC | Trace + debug | OpenTelemetry pipeline → Jaeger / Datadog — separate observability stack | `@mlflow.trace` decorators land in the same MLflow experiment UI as classic ML runs |
+# MAGIC
+# MAGIC **How this composes in production**
+# MAGIC
+# MAGIC The VS index updates automatically as new tickets land in the source Delta table (re-trigger `index.sync()` on a Job schedule, or flip `pipeline_type='CONTINUOUS'` for sub-minute freshness). The retrieve → augment → generate chain is portable: Module 8 wraps the same `index.similarity_search` call inside a `ResponsesAgent` tool, so the agent inherits all the trace/observability properties for free. The `@production` prompt alias means a prompt-engineering iteration in Module 9 propagates to both the standalone RAG chain AND the agent's retrieval tool without any code changes.
+# MAGIC
 # MAGIC **What's next — Module 8: Retention Outreach Agent**
 # MAGIC
 # MAGIC Module 8 wraps the Module 4 churn endpoint AND the index you just built into a `ResponsesAgent` that drafts personalized retention emails. We'll deploy that agent for real via `agents.deploy()`. Open `modules/08_retention_agent/08_retention_agent.py`.
@@ -332,3 +358,4 @@ except Exception as exc:
 # MAGIC - [Create & query Vector Search](https://docs.databricks.com/aws/en/generative-ai/create-query-vector-search)
 # MAGIC - [Delta Sync vs Direct Access](https://docs.databricks.com/aws/en/generative-ai/vector-search)
 # MAGIC - [MLflow Tracing for RAG](https://mlflow.org/docs/latest/genai/tracing/)
+# MAGIC - [Vector Search managed embedding models](https://docs.databricks.com/aws/en/generative-ai/vector-search#embedding-models)

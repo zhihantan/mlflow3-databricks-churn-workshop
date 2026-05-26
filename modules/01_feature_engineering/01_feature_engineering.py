@@ -10,6 +10,17 @@
 # MAGIC - Compute eight churn features per customer from the raw Module 0 tables, joined consistently to the snapshot date.
 # MAGIC - Assemble a training set via `FeatureLookup(timestamp_lookup_key=...)` — the point-in-time-correct join pattern that prevents target leakage.
 # MAGIC
+# MAGIC **Databricks features showcased**
+# MAGIC
+# MAGIC - **Unity Catalog three-part naming** (`<catalog>.<schema>.<table>`) — every feature table, training set, and downstream artifact in this workshop carries UC's lineage + governance for free.
+# MAGIC - **Feature Engineering in UC** (`databricks-feature-engineering` SDK) — `FeatureEngineeringClient.create_table(...)` registers a UC-native, governed feature table; `write_table(..., mode="merge")` upserts idempotently by primary key.
+# MAGIC - **Time-series feature tables** — `timeseries_columns="snapshot_date"` marks the table as point-in-time aware so `FeatureLookup(timestamp_lookup_key=...)` does as-of-timestamp joins.
+# MAGIC - **Delta Lake** under the hood — schema evolution (`overwriteSchema`), ACID writes, time travel all come for free; we don't manage any of it.
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC Point-in-time correct feature joins prevent the kind of data-leakage that would inflate offline AUC by 5-10 points and then crash in production when scoring renewal decisions on customers whose 90-day claim window doesn't yet contain "the future." For a global insurtech serving SG/MY/ID/TH/JP/KR markets with rolling policy renewal dates, every feature must be computed strictly from data known *before* the renewal scoring timestamp — otherwise the model learns to "predict" churn from events that haven't happened yet, then degrades silently in production.
+# MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
 # MAGIC - Module 0 (`setup/00_setup_and_synthetic_data.py`) has been run.
@@ -200,6 +211,17 @@ display(features_df.limit(10))
 # MAGIC - `primary_keys=['customer_id', 'snapshot_date']` — entity + time, jointly unique.
 # MAGIC - `timeseries_columns='snapshot_date'` — marks this as a time-series feature table so `FeatureLookup` can do as-of-timestamp joins.
 # MAGIC - `schema=features_df.schema` — copy the Spark schema directly so we don't drift.
+# MAGIC
+# MAGIC **Why Databricks-native over DIY?** Without UC Feature Engineering you would be running a Postgres/Redis feature store, hand-writing an offline-to-online sync job, maintaining a separate lineage tracker so downstream consumers know which raw tables fed which features, and re-implementing point-in-time semantics in custom Spark code. Here the feature table is a Delta table under your UC schema — permissions, lineage, audit, time travel all come from UC. Modules 2-10 will reference these features by name only; they don't know or care about the underlying physical layout.
+# MAGIC
+# MAGIC | Capability | UC Feature Engineering | DIY |
+# MAGIC | --- | --- | --- |
+# MAGIC | Governance + ACLs | Inherited from UC schema | Build a separate auth layer |
+# MAGIC | Lineage to upstream tables | Auto, viewable in Catalog Explorer | Maintain manually |
+# MAGIC | Point-in-time joins | `timestamp_lookup_key=` parameter | Hand-roll the windowed join logic |
+# MAGIC | Online serving sync | One call away (`publish_table`) | Build + monitor a separate pipeline |
+# MAGIC
+# MAGIC Ref: [Feature tables in Unity Catalog](https://docs.databricks.com/aws/en/machine-learning/feature-store/uc/feature-tables-uc)
 
 # COMMAND ----------
 
@@ -246,6 +268,8 @@ print(f"Wrote {written:,} feature rows to {FEATURE_TABLE}")
 # MAGIC ## 6. Assemble the training set via point-in-time `FeatureLookup`
 # MAGIC
 # MAGIC `FeatureLookup(timestamp_lookup_key='snapshot_date')` tells the FE client: "for each row in the labels DataFrame, look up the feature row whose `snapshot_date` is the most recent value at or before the label's `snapshot_date`." With a single snapshot date in this workshop the lookup is degenerate (every label finds an exact-match feature row), but the *pattern* is what production point-in-time training requires — and it would scale unchanged if we logged daily snapshots.
+# MAGIC
+# MAGIC **Why this matters operationally.** When you eventually backfill features across multiple snapshot dates (say, weekly snapshots over the last 12 months for a richer training window), the *same* `FeatureLookup` call generates correct features per label row — no custom backfill orchestrator, no risk of accidentally joining a Jan 2026 label row against May 2026 features. The training set produced by `fe.create_training_set(...)` also carries lineage back to the feature table, so model auditors can trace any prediction back through model → training_set → feature_table → raw upstream Delta tables, all viewable in Catalog Explorer.
 # MAGIC
 # MAGIC Ref: https://docs.databricks.com/aws/en/machine-learning/feature-store/time-series
 
@@ -333,6 +357,14 @@ display(
 # MAGIC - A materialized training set at `<schema>.churn_training_set` that joins the snapshot labels against features via `FeatureLookup(timestamp_lookup_key=...)`.
 # MAGIC - A leakage-free feature pipeline: every event-driven aggregate strictly uses data with timestamp **<** snapshot_date.
 # MAGIC
+# MAGIC **What you'd build without Databricks**
+# MAGIC
+# MAGIC A self-hosted Postgres or Redis "feature store" for online lookups, a separate batch sync job to keep offline ≈ online, a custom backfill orchestrator that knows how to materialize features for arbitrary historical snapshot dates, your own metadata service for primary-key + timeseries-column contracts, and a hand-written lineage tracker so downstream consumers know which raw tables fed which features. All of that is replaced here by a single `create_table(...)` call plus the standard UC permissions you already have on the schema.
+# MAGIC
+# MAGIC **How this composes in production**
+# MAGIC
+# MAGIC Module 2 trains on `<schema>.churn_training_set` — but the same `FeatureLookup` pattern works in real-time inference too. In the production deployment, you'd publish this feature table to an online store (`fe.publish_table(...)`) and the Model Serving endpoint in Module 4 would automatically fetch features at request time by primary key. No code change to the model. No separate online/offline sync to maintain. The training set you just materialized becomes the contract — and downstream modules (3 for tuning, 4 for serving, 5 for monitoring) all reference it by name, not by physical layout.
+# MAGIC
 # MAGIC **What's next — Module 2: Experiment Tracking & LoggedModel**
 # MAGIC
 # MAGIC Module 2 trains a baseline LR and a LightGBM classifier on this training set, demonstrating the MLflow 3 `LoggedModel` entity and the `models:/<model_id>` URI scheme. Open `modules/02_experiment_tracking/02_experiment_tracking.py`.
@@ -341,3 +373,4 @@ display(
 # MAGIC - [Feature Engineering in UC — feature tables](https://docs.databricks.com/aws/en/machine-learning/feature-store/uc/feature-tables-uc)
 # MAGIC - [Time-series feature tables / point-in-time joins](https://docs.databricks.com/aws/en/machine-learning/feature-store/time-series)
 # MAGIC - [Why point-in-time joins prevent target leakage](https://docs.databricks.com/aws/en/machine-learning/feature-store/time-series#point-in-time-lookup)
+# MAGIC - [Publish features for online serving](https://docs.databricks.com/aws/en/machine-learning/feature-store/uc/publish-features)

@@ -4,6 +4,8 @@
 # MAGIC
 # MAGIC This is the **flagship MLflow 3 module** of the workshop. The biggest conceptual change between MLflow 2 and 3 is that **`LoggedModel` is now a first-class entity** — separate from any single run, with its own lifecycle, its own ID, and its own URI scheme (`models:/<model_id>`). Everything else in this workshop builds on that.
 # MAGIC
+# MAGIC **The mental model shift, in one paragraph.** In MLflow 2 a "model" was an artifact hanging off a run. You retrieved it as `runs:/<run_id>/<artifact_path>` — the run was the unit of identity. In MLflow 3, every `mlflow.<flavor>.log_model(..., name=...)` call mints a `LoggedModel` entity with its own ID, its own page in the experiment UI, and its own metadata (metrics, params, datasets, traces, and evaluation results bind to *it*, not to a run). A model is no longer a side-effect of a run; the run is the side-effect of producing a model. This matters because every downstream MLflow 3 API — `mlflow.evaluate(model_id=...)`, `mlflow.register_model(model_uri="models:/<id>")`, the Prompt Registry, the Mosaic AI Agent Framework — keys off `model_id`, not `run_id`.
+# MAGIC
 # MAGIC **Learning objectives**
 # MAGIC
 # MAGIC By the end of this notebook you will:
@@ -12,6 +14,18 @@
 # MAGIC - See how `mlflow.autolog()` + `mlflow.<flavor>.log_model(..., name=...)` produces independent `LoggedModel` entities — not run-scoped artifacts.
 # MAGIC - Retrieve a model by its `model_id` and load it via the new `models:/<model_id>` URI scheme.
 # MAGIC - Understand the three biggest breaking changes between MLflow 2.x and 3.x that participants will hit when porting old code.
+# MAGIC
+# MAGIC **Databricks features showcased**
+# MAGIC
+# MAGIC - **MLflow 3 `LoggedModel` entity** — the new model identity primitive. Decoupled from runs, addressable by `models:/<model_id>`, persists evaluation + tracing + registry metadata against itself.
+# MAGIC - **MLflow autologging** (`mlflow.autolog`) — produces a LoggedModel per training call automatically; `log_traces=True` by default in MLflow 3 (relevant once GenAI enters the mix in Module 6).
+# MAGIC - **Per-user MLflow experiments** under the workspace user folder — isolation on a shared workspace without per-participant ceremony.
+# MAGIC - **MLflow Models signatures** (`infer_signature`, `input_example`) — UC registry requires a signature; downstream Model Serving uses the signature to validate request payloads.
+# MAGIC - **Delta-backed workshop state** — we MERGE the `model_id` of the LGBM baseline into a `workshop_state` Delta table so Module 3 can recover it. Same pattern you'd use in a multi-task Databricks Job.
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC In a regulated environment, every model that scores a policyholder needs an audit trail: which training data, which hyperparameters, which evaluation results, who deployed it, when. MLflow 3's `LoggedModel` is that anchor — the metrics from Module 3, the registry version in Module 4, the inference logs in Module 5, and the eval scores in Module 9 all bind to the *same* `model_id`. When an MAS / regulator asks "show me everything about the model that produced this churn score on customer X," you point at one `model_id` and the entire lineage falls out of UC + MLflow without manual reconstruction.
 # MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
@@ -253,6 +267,8 @@ print(f"LGBM test_auc  = {test_auc_lgb:.4f}")
 # MAGIC
 # MAGIC The killer feature of MLflow 3 is that each logged model has its own URI (`models:/<model_id>`) and its own page in the experiment UI — independent of the run that created it. You can attach metrics, parameters, datasets, and dependencies to a `LoggedModel` directly.
 # MAGIC
+# MAGIC **What `mlflow.get_logged_model(...)` returns** is a structured object you can introspect (and program against): `model_id`, `name`, `experiment_id`, `source_run_id`, `status` (`READY` once artifacts are persisted), `artifact_location` (a UC volumes path managed by Databricks), and creation timestamps. In production this is what your CI / governance tooling queries to verify a model is fit to register — e.g., "does this LoggedModel have a `test_auc` metric ≥ 0.78 and a `bolttech_voice` scorer pass before we promote it to `@champion`?"
+# MAGIC
 # MAGIC Ref: https://mlflow.org/docs/latest/ml/mlflow-3/
 
 # COMMAND ----------
@@ -276,6 +292,8 @@ print(f"  creation_timestamp = {lgb_model_entity.creation_timestamp}")
 # MAGIC ## 9. Load by `models:/<model_id>` URI
 # MAGIC
 # MAGIC The new URI scheme replaces `runs:/<run_id>/<artifact_path>` from MLflow 2. The two forms below load the *same* model — but only the second one works in MLflow 3 if you didn't capture the run_id (and runs are no longer the unit of model identity).
+# MAGIC
+# MAGIC **Where this URI shows up downstream:** `mlflow.register_model(model_uri="models:/<model_id>", name="<cat>.<sch>.<model>")` in Module 4 takes the LoggedModel directly to UC Registry — no intermediate "promotion" step. `mlflow.evaluate(model="models:/<model_id>", model_id="<model_id>", ...)` in Module 3 binds eval results to the LoggedModel. Once you're holding a `model_id`, every MLflow 3 surface accepts it.
 
 # COMMAND ----------
 
@@ -351,6 +369,14 @@ display(spark.table(STATE_TABLE))
 # MAGIC - `mlflow.autolog()` in MLflow 3 produces LoggedModels automatically and defaults `log_traces=True`.
 # MAGIC - Three breaking changes from MLflow 2.x — `name=` replacing `artifact_path=`, model storage location, and `mlflow.evaluate(baseline_model=...)` removal.
 # MAGIC
+# MAGIC **What you'd build without Databricks**
+# MAGIC
+# MAGIC Self-host MLflow on a VM (or run the OSS server in Kubernetes), wire up your own artifact store (S3 / GCS / Azure Blob) plus database backend (Postgres/MySQL) for the tracking server, write a sidecar service that grants per-user experiment paths, manage the upgrade path from MLflow 2 → 3 yourself, and bolt on a separate audit log so security can see who touched which model when. Here, the experiment lives at a per-user UC path on a managed tracking server, artifacts persist to Databricks-managed storage, and you get the new `LoggedModel` entity without standing anything up.
+# MAGIC
+# MAGIC **How this composes in production**
+# MAGIC
+# MAGIC The two `model_id` values you just persisted to `workshop_state` thread through the rest of the workshop: Module 3 binds Optuna trials and `mlflow.evaluate` results to a third `model_id` (the tuned LGBM); Module 4 registers two of those `model_id`s in UC as `@champion` and `@challenger`; Module 5 tracks drift against the `@champion`; Modules 8-10 attach agent inference traces to a final agent `model_id`. The Delta `workshop_state` table is the same handoff pattern a real Databricks Job would use between tasks — a single source of truth for IDs that survives notebook restarts and JIT cluster spin-up.
+# MAGIC
 # MAGIC **What's next — Module 3: Tuning & `mlflow.evaluate`**
 # MAGIC
 # MAGIC Module 3 tunes the LightGBM model with Optuna (15 trials), then uses `mlflow.evaluate` with a custom business metric (expected retention value) bound to the resulting `LoggedModel` via `model_id=`. Open `modules/03_tuning_and_eval/03_tuning_and_eval.py`.
@@ -359,3 +385,4 @@ display(spark.table(STATE_TABLE))
 # MAGIC - [MLflow 3 migration guide](https://mlflow.org/docs/latest/ml/mlflow-3/)
 # MAGIC - [LoggedModel concept](https://mlflow.org/docs/latest/ml/model/)
 # MAGIC - [Autologging in MLflow 3](https://mlflow.org/docs/latest/ml/tracking/autolog/)
+# MAGIC - [Manage model lifecycle in Unity Catalog](https://docs.databricks.com/aws/en/machine-learning/manage-model-lifecycle/)

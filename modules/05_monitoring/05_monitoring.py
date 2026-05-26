@@ -15,6 +15,18 @@
 # MAGIC - Persist drift metrics to a queryable Delta table + log them to MLflow for time-series tracking.
 # MAGIC - Use `mlflow.evaluate(model_type="classifier")` per window to detect *prediction* drift (not just input drift) — model performance shift over time.
 # MAGIC
+# MAGIC **Databricks features showcased**
+# MAGIC
+# MAGIC - **Delta inference table** with Change Data Feed enabled — every prediction the model makes is durable, queryable, and time-travel-able. The same table backs drift detection, retraining label backfills, and audit trails.
+# MAGIC - **`mlflow.evaluate(model_type="classifier")` per window** — turns "did model performance shift?" into a 4-line cell, with metrics auto-logged into MLflow for direct chart-based comparison across windows / model versions / dates.
+# MAGIC - **MLflow as the metric time-series store** — every drift refresh is a new MLflow run with per-feature drift statistics as logged metrics. Open the experiment, chart `drift_p_value__payment_failures_60d`, and you have a free SRE-grade dashboard for free.
+# MAGIC - **Delta + Databricks SQL Alerts** — the persisted `<schema>.churn_drift_metrics` table is queryable from SQL Warehouses, Lakeview dashboards, and SQL Alerts. Setting an alert ("email me when `features_with_drift > 0`") is a 30-second SQL config, no Airflow/PagerDuty plumbing required.
+# MAGIC - **(Forward-looking) Lakehouse Monitoring** — `WorkspaceClient.quality_monitors` on the Databricks SDK is the fully-managed path. It auto-generates the same drift Delta tables + a dashboard. We hand-roll the math here so the *concept* is visible, but for production you'd flip to the managed surface.
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC bolttech's customer base spans 14 APAC + EMEA markets where macro events shift feature distributions overnight — a regional payment-processor outage drives `payment_failures_60d` up; a new pricing tier rollout changes `plan_tier` distribution; a viral social-media incident spikes `support_ticket_count_30d`. Without drift detection the churn model silently degrades, retention campaigns target the wrong customers, and the discovery happens only after a quarter of poor renewal numbers. With a daily-refreshed drift Delta + MLflow time series + a SQL Alert, the data team catches macro shifts in hours and triggers a retraining pipeline before customer-experience damage compounds.
+# MAGIC
 # MAGIC **Why simulated and not real endpoint traffic?** The Module 4 endpoint only has whatever traffic our 3 sample predictions generated. Drift detection needs population over time. Simulating gives a deterministic, didactically clean drift signal in seconds instead of needing participants to send hundreds of predictions.
 # MAGIC
 # MAGIC **Prerequisites**
@@ -339,6 +351,20 @@ display(
 # MAGIC - Persisting drift as a Delta table makes it queryable from SQL and pluggable into Databricks SQL alerts; logging to MLflow gives you a per-run history you can chart in the MLflow UI.
 # MAGIC - For full production-grade monitoring (auto-generated dashboards, slicing, async refresh) the forward-looking path is `WorkspaceClient.quality_monitors` on the Databricks SDK. The math you saw here is exactly what that service computes under the hood.
 # MAGIC
+# MAGIC **What you'd build without Databricks**
+# MAGIC
+# MAGIC | Concern | DIY stack | Databricks-native |
+# MAGIC | --- | --- | --- |
+# MAGIC | Inference logging | Custom service writing to S3 / Postgres; manual schema management | Delta inference table (1 SQL `saveAsTable`) with CDF + time travel |
+# MAGIC | Drift compute | Standalone Python job in Airflow + custom alerting | `scipy.stats` cell + MLflow log_metric, or fully-managed Lakehouse Monitoring |
+# MAGIC | Drift dashboards | Grafana / Tableau / custom React | MLflow Experiment UI auto-charts logged metrics; Lakeview dashboards over the Delta table |
+# MAGIC | Alerts on drift breach | PagerDuty + custom integrations | Databricks SQL Alert ("when `features_with_drift > 0` send Slack") in 30 seconds |
+# MAGIC | Retraining trigger | Custom orchestration to coordinate detection → training → deploy | Same Databricks Job DAG chains M5 → re-run M2/M3 → M4 redeploy |
+# MAGIC
+# MAGIC **How this composes in production**
+# MAGIC
+# MAGIC Schedule this notebook as a daily Databricks Job task that depends on M4's batch_predictions table refresh. Add a SQL Alert on the drift table for an automated "model needs retraining" signal. When the alert fires, the next-job-in-chain re-runs the training pipeline (Modules 2-4), promotes the new model to `@champion`, and the inference table picks up the new model version automatically — closing the MLOps feedback loop without any custom orchestration.
+# MAGIC
 # MAGIC **What's next — Module 6: Tracing & Prompt Registry**
 # MAGIC
 # MAGIC Module 6 opens the **GenAI half of the workshop**. We'll make a call against the Foundation Model APIs with MLflow Tracing on, register a prompt template in the Prompt Registry, and start the Vector Search endpoint provisioning that Module 7 will use. Open `modules/06_tracing_and_prompts/06_tracing_and_prompts.py`.
@@ -348,3 +374,4 @@ display(
 # MAGIC - [scipy.stats.chi2_contingency](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.chi2_contingency.html)
 # MAGIC - [mlflow.evaluate](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.html#mlflow.evaluate)
 # MAGIC - [Databricks Lakehouse Monitoring (forward-looking SDK path)](https://docs.databricks.com/aws/en/lakehouse-monitoring/)
+# MAGIC - [Databricks SQL Alerts](https://docs.databricks.com/aws/en/sql/user/alerts/)

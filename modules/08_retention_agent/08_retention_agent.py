@@ -14,6 +14,20 @@
 # MAGIC - Register it in UC and call `agents.deploy()` end-to-end.
 # MAGIC - Test locally first, then query the deployed endpoint.
 # MAGIC
+# MAGIC **Databricks features showcased** (this is the headliner module — depth justified)
+# MAGIC
+# MAGIC - **`mlflow.pyfunc.ResponsesAgent`** — the canonical 2026 Databricks agent flavor, built on the OpenAI Responses-API schema. Subclass it, implement `predict()`, ship. MLflow handles the input/output schema validation, signature inference, and the entire Models-from-Code lifecycle.
+# MAGIC - **Models-from-Code logging** (`python_model=<path_to_agent.py>`) — instead of pickling a Python object (fragile, version-dependent, no version-control story), MLflow ingests the agent's source file. The file goes into the logged model artifacts; deployment re-executes it in a fresh container. Code is the contract.
+# MAGIC - **`resources=[DatabricksServingEndpoint(...), DatabricksVectorSearchIndex(...)]`** — the magic line. Declares which Databricks resources the deployed agent will need. At deploy time, Model Serving auto-injects scoped OAuth credentials so the agent can reach them — **no token vault, no service principal management, no auth boilerplate inside the agent**. The deployed agent gets exactly the access it declared and nothing more.
+# MAGIC - **`databricks.agents.deploy(uc_model_name, version)`** — one call that provisions: (1) a Model Serving endpoint, (2) a Databricks Review App for human-in-the-loop approval, (3) auto-captured inference tables (every prediction logged to a Delta table for analysis + retraining), (4) real-time MLflow tracing. Replaces what would otherwise be weeks of platform engineering.
+# MAGIC - **Unity Catalog model registry for agents** — agents are first-class registered models, governed alongside your structured data + classic ML models. Aliases (`@champion`), versioning, lineage all work the same way.
+# MAGIC - **OpenAI-compatible chat models via FMAPI** — the agent uses `OpenAIChatCompletionsModel` adapter so Claude (and any other FMAPI model) becomes a drop-in for the OpenAI Agents SDK. No vendor lock-in to OpenAI proper.
+# MAGIC - **Background-provisioning pattern** (encore from Module 4) — the ~8-12 min endpoint cold-start is absorbed by exercising the locally-loaded copy of the agent first. Same MLflow-logged code, same artifacts; the local-load gives you a sub-second iteration loop during development.
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC Customer-facing retention emails for a regulated insurer cannot ship without (1) human approval before send, (2) traceable inputs/outputs for every draft, (3) reliable scoped credentials so the agent can only reach the data it should, and (4) a path to fine-tune behavior without redeploy. `agents.deploy()` gives bolttech all four out of the box: the Review App is where the CS team approves drafts before send; inference tables become the audit trail; `resources=[...]` is the scoped-credentials story; and the Prompt Registry alias swap (Module 9) is how prompt iteration ships without a redeploy. The alternative — build all of this yourself — is what kills internal GenAI projects at most insurers in 2026.
+# MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
 # MAGIC - Modules 0, 4, 6, 7 have all been run. (Module 4's churn endpoint and Module 7's VS index must exist.)
@@ -372,6 +386,21 @@ display(spark.table(STATE_TABLE))
 # MAGIC - Models-from-Code logging with `resources=[...]` so the deployed endpoint has auto-auth into the downstream Databricks resources.
 # MAGIC - A UC-registered agent at `<schema>.bolttech_retention_agent` and a real `agents.deploy()` provisioned endpoint with a Review App.
 # MAGIC
+# MAGIC **What you'd build without Databricks**
+# MAGIC
+# MAGIC | Concern | DIY stack | Databricks-native (this module) |
+# MAGIC | --- | --- | --- |
+# MAGIC | Agent serving infra | FastAPI + Uvicorn + K8s deployment + autoscaler + cold-start optimization | `agents.deploy()` — one call, scale-to-zero, all configured |
+# MAGIC | Auth between agent and dependencies | Service principal per dep + token vault + rotation policy + per-request signing | `resources=[...]` declaration → Model Serving injects scoped OAuth, agent code stays auth-free |
+# MAGIC | Human-in-the-loop approval | Build a Streamlit/React review interface; queue management; per-reviewer auth | Databricks Review App provisioned automatically with the deploy |
+# MAGIC | Inference logging | Custom middleware writing to S3 → Athena tables → bespoke schema | Auto-captured inference Delta table — feed back into retraining for free |
+# MAGIC | Tracing in production | OpenTelemetry → Jaeger / Datadog — separate observability stack | Real-time MLflow traces in the same experiment as everything else |
+# MAGIC | Agent versioning | Custom registry; manual lineage tracking | UC Model Registry — same `@champion`/`@challenger` aliasing as classic ML |
+# MAGIC
+# MAGIC **How this composes in production**
+# MAGIC
+# MAGIC The deployed agent endpoint is the public API for retention email drafting. A scheduled Databricks Job (Module 10 demonstrates the orchestration) batch-scores customers via the M4 churn endpoint, picks top-K at risk, and hits this agent endpoint for each. Drafted emails land in the agent's auto-captured inference table. The CS team reviews and approves in the Review App; approved emails flow into Salesforce / Iterable / your ESP. Compliance can audit any draft via the inference table or the MLflow trace. Re-prompting iterations (Module 9) ship via prompt-alias swaps — no redeploy.
+# MAGIC
 # MAGIC **What's next — Module 9: GenAI Evaluation**
 # MAGIC
 # MAGIC Module 9 runs `mlflow.genai.evaluate` on the **locally-loaded** agent (faster, no dependency on deploy timing) with built-in scorers + a custom `Guidelines` scorer for bolttech voice. Open `modules/09_genai_evaluation/09_genai_evaluation.py`.
@@ -381,3 +410,4 @@ display(spark.table(STATE_TABLE))
 # MAGIC - [Log an agent](https://docs.databricks.com/aws/en/generative-ai/agent-framework/log-agent)
 # MAGIC - [Deploy an agent](https://docs.databricks.com/aws/en/generative-ai/agent-framework/deploy-agent)
 # MAGIC - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
+# MAGIC - [Databricks Review App](https://docs.databricks.com/aws/en/generative-ai/agent-evaluation/review-app)

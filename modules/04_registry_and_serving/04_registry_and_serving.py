@@ -13,6 +13,18 @@
 # MAGIC - Batch-score the customer snapshot via `mlflow.pyfunc.spark_udf(...)` using `models:/<name>@champion`.
 # MAGIC - Provision a Model Serving endpoint and query it via REST through the MLflow Deployments client.
 # MAGIC
+# MAGIC **Databricks features showcased**
+# MAGIC
+# MAGIC - **Unity Catalog Model Registry** (`mlflow.set_registry_uri("databricks-uc")`) — three-part naming `<catalog>.<schema>.<model>` with UC governance and ACLs. The legacy workspace registry is deprecated; UC is now the only path.
+# MAGIC - **Model aliases** (`@champion`, `@challenger`) — version-agnostic references. Downstream code reads `models:/<name>@champion`; flipping a new version into that alias is one API call, no consumer changes.
+# MAGIC - **Databricks Model Serving** — provisioned via `WorkspaceClient.serving_endpoints.create(...)`, scale-to-zero by default, REST endpoint with workspace-scoped auth.
+# MAGIC - **`mlflow.pyfunc.spark_udf(...)`** — batch scoring via a Spark UDF resolved from `models:/<name>@champion`. The same model URI works for batch and online.
+# MAGIC - **Background-provisioning pattern** — `serving_endpoints.create(...)` returns a `Wait` handle; we do useful work and call `.result(timeout=...)` later. Same idiom used by `agents.deploy()` in Module 8.
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC Renewal decisions happen at customer touch-time, not in nightly batch. A policyholder visits the app to update payment details — the system needs to score "is this customer at risk?" in <100ms and route them to a retention flow if so. Batch scoring (the `spark_udf` path) covers proactive nightly outreach lists; Model Serving (the REST path) covers the real-time touch-points. Both load the *same* model via `models:/<name>@champion`. Flipping the champion alias to a newly-validated version doesn't change any consumer code — the in-app risk check, the nightly batch job, and the agent in Module 8 all pick up the new version automatically.
+# MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
 # MAGIC - Modules 0, 1, 2, 3 have been run.
@@ -175,6 +187,14 @@ print(f"Registered baseline LGBM as {CHURN_MODEL_NAME} version {baseline_version
 # MAGIC
 # MAGIC Aliases are the MLflow 3 production-recommended way to refer to "the current production model" (vs. relying on numeric versions in downstream code).
 # MAGIC
+# MAGIC **Why aliases beat "production stage" labels (the MLflow 2 way).** In MLflow 2 you had a fixed set of stages (`Staging` / `Production` / `Archived`). Aliases are arbitrary string labels you choose — `@champion`, `@challenger`, `@shadow_pricing_v2`, `@sg_market`, whatever fits your promotion workflow. A model can carry multiple aliases simultaneously, version-N can be `@champion` in one workflow and `@challenger` in another, and you can A/B test by routing traffic between aliases on a single serving endpoint.
+# MAGIC
+# MAGIC | Pattern | Why it works |
+# MAGIC | --- | --- |
+# MAGIC | Batch job loads `models:/<name>@champion` | Auto-picks up the newest promoted version each run |
+# MAGIC | Shadow eval loads `models:/<name>@challenger` | Compare predictions vs champion without changing consumers |
+# MAGIC | Promotion = one `client.set_registered_model_alias(...)` call | No code redeploy, no env var change |
+# MAGIC
 # MAGIC Ref: https://mlflow.org/docs/latest/ml/model-registry/workflow/
 
 # COMMAND ----------
@@ -198,6 +218,8 @@ for alias in ("champion", "challenger"):
 # MAGIC We use `serving_endpoints.create()` (returns immediately with a `Wait` handle) instead of `create_and_wait()` so the subsequent cells can do useful work while the endpoint provisions in the background.
 # MAGIC
 # MAGIC Idempotent: if the endpoint already exists from a prior run, we `update_config()` it instead of creating from scratch.
+# MAGIC
+# MAGIC **What you're getting from Databricks Model Serving** beyond "a REST URL": auto-managed container build from the LoggedModel's `requirements.txt`, workspace-scoped service-principal auth (callers from inside the workspace authenticate transparently), `scale_to_zero_enabled=True` so the endpoint costs nothing when idle, autoscaling based on QPS, integrated request logging via inference tables (Module 5 will use these), and Mosaic AI Gateway integration for rate-limiting / PII redaction / model-name routing. The DIY equivalent is your own GPU/CPU pod orchestration, a custom auth proxy, a metrics + logs sidecar, and an autoscaler — typically 4-8 weeks of platform work.
 # MAGIC
 # MAGIC Ref: https://docs.databricks.com/aws/en/machine-learning/model-serving/create-manage-serving-endpoints
 
@@ -354,6 +376,14 @@ display(spark.table(STATE_TABLE))
 # MAGIC - Background-provisioning pattern: fire `serving_endpoints.create()`, do other work, `.result(timeout=...)` at the end.
 # MAGIC - Two ways to score: `mlflow.pyfunc.spark_udf` for batch (no endpoint needed) vs `mlflow.deployments.get_deploy_client("databricks").predict(...)` for REST.
 # MAGIC
+# MAGIC **What you'd build without Databricks**
+# MAGIC
+# MAGIC Stand up your own model registry (MLflow OSS server + database + artifact store), build a custom alias / stage layer with versioned routing, containerize each model version yourself with Docker + the right base image + pip requirements, run a Kubernetes inference service with autoscaling rules, build an auth proxy that resolves workspace identities to model permissions, and add a separate request-logging pipeline so you can later detect drift. Three to four full quarters of platform engineering replaced by `register_model(...)` + `serving_endpoints.create(...)`.
+# MAGIC
+# MAGIC **How this composes in production**
+# MAGIC
+# MAGIC The REST endpoint you just provisioned is the production scoring path — Module 8's retention agent calls it as a tool via `DatabricksServingEndpoint(endpoint_name=CHURN_ENDPOINT)` with auto-auth, and Module 10's capstone uses the same endpoint for end-of-pipeline scoring. The inference table that Model Serving writes (when enabled) is what Module 5's monitoring would attach to in a real deployment. The `@champion` alias is the contract: when a future retraining run produces a better tuned model, you re-register it, flip the alias, and every consumer — batch UDF, REST endpoint, agent tool — picks up the new version with zero code change.
+# MAGIC
 # MAGIC **What's next — Module 5: Lakehouse Monitoring**
 # MAGIC
 # MAGIC Module 5 simulates an inference table with synthetic drift and sets up a Lakehouse monitor against the model you just deployed. Open `modules/05_monitoring/05_monitoring.py`.
@@ -362,3 +392,4 @@ display(spark.table(STATE_TABLE))
 # MAGIC - [Manage model lifecycle in UC](https://docs.databricks.com/aws/en/machine-learning/manage-model-lifecycle/)
 # MAGIC - [Create custom serving endpoints](https://docs.databricks.com/aws/en/machine-learning/model-serving/create-manage-serving-endpoints)
 # MAGIC - [Score custom model endpoints](https://docs.databricks.com/aws/en/machine-learning/model-serving/score-custom-model-endpoints)
+# MAGIC - [Inference tables for served models](https://docs.databricks.com/aws/en/machine-learning/model-serving/inference-tables)

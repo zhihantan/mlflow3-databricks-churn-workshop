@@ -18,6 +18,19 @@
 # MAGIC - Decorate a wrapper function with `@mlflow.trace` for custom span naming.
 # MAGIC - Register a prompt template, set a `@production` alias, and load + format it by alias.
 # MAGIC
+# MAGIC **Databricks features showcased**
+# MAGIC
+# MAGIC - **Databricks Foundation Model APIs (FMAPI)** — pay-per-token access to `databricks-claude-haiku-4-5`, `databricks-claude-sonnet-4-6`, `databricks-meta-llama-3-3-70b-instruct`, `databricks-gpt-5-mini`, and embedding models like `databricks-gte-large-en`. Same workspace, same auth, same governance as your data — no separate vendor account or BYOK plumbing.
+# MAGIC - **OpenAI-compatible client against FMAPI** — point a plain `openai.OpenAI` client at `{workspace}/serving-endpoints` with your workspace token; every OpenAI SDK pattern you already know works unchanged. No vendor lock-in either direction.
+# MAGIC - **MLflow Tracing** (`mlflow.openai.autolog()`) — one line patches the OpenAI SDK to emit a full trace per call: inputs, outputs, token counts, latency, errors. Visible in the MLflow Traces tab in the experiment UI; queryable via `mlflow.search_traces(...)`.
+# MAGIC - **`@mlflow.trace` decorator with `SpanType.CHAIN` / `SpanType.LLM`** — explicit named spans wrap auto-traced calls so the trace tree shows your pipeline structure (retrieve → augment → generate), not just one flat LLM call.
+# MAGIC - **MLflow Prompt Registry** — versioned prompt templates with `{{variable}}` Jinja-style syntax, aliases (`@production`), full lifecycle on the platform. `mlflow.genai.register_prompt(...)` creates an immutable version; `set_prompt_alias` swaps which version `@production` points at — every consumer that loads `prompts:/<name>@production` picks up the new version automatically.
+# MAGIC - **Vector Search endpoint provisioning** (kicked off here for Module 7) — `VectorSearchClient.create_endpoint(...)` returns immediately; provisioning happens async in the background.
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC Regulated insurers cannot ship customer-facing LLM features without (1) a defensible audit trail of every model call, (2) version-controlled prompts that survive personnel turnover, and (3) compliance teams able to inspect what the model actually said in any given interaction. MLflow Tracing + Prompt Registry give bolttech all three out of the box, in the same governance plane as their structured data. The alternative — duct-taping Langfuse + Helicone + GitHub-stored prompts + bespoke audit pipelines — is fragile and audit-hostile.
+# MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
 # MAGIC - Module 0 has been run (we need the per-user catalog/schema to exist).
@@ -302,6 +315,20 @@ if len(recent_traces):
 # MAGIC - Aliases (`@production`) decouple downstream code from prompt versions — flip the alias, every consumer follows.
 # MAGIC - Calls through the Databricks Foundation Model APIs use a plain `openai.OpenAI` client against `{workspace}/serving-endpoints` — no extra SDK needed.
 # MAGIC
+# MAGIC **What you'd build without Databricks**
+# MAGIC
+# MAGIC | Concern | DIY stack | Databricks-native |
+# MAGIC | --- | --- | --- |
+# MAGIC | LLM provider | OpenAI/Anthropic vendor account + key vault + billing-isolation policies | FMAPI in same workspace, same governance plane, same billing as data |
+# MAGIC | Trace capture | Langfuse / Helicone / Arize Phoenix as separate services | `mlflow.openai.autolog()` — one line, same MLflow you already use for classic ML |
+# MAGIC | Prompt versioning | Prompts in Git + custom loader + bespoke alias scheme | Prompt Registry with first-class `{{var}}` templates, immutable versions, alias API |
+# MAGIC | Audit trail | Build it: structured logs → S3 → Athena → bespoke compliance reports | MLflow Traces are queryable via `search_traces`, viewable in UI, retained per experiment-retention policy |
+# MAGIC | Cost attribution | Per-call token logging + custom cost calculator | Token counts captured automatically per trace; Databricks usage system tables roll up FMAPI cost by workspace + user |
+# MAGIC
+# MAGIC **How this composes in production**
+# MAGIC
+# MAGIC The Prompt Registry alias you set here (`@production`) is what every downstream module loads. When prompt engineering iterates in Module 9, bumping the alias to v2 propagates instantly to the RAG chain (M7) and the agent (M8) — without redeploying anything. The trace tree you build via `@mlflow.trace` becomes the production debugging tool: when a retention email goes wrong in production, search the traces for that customer_id and walk the spans from agent → tool → LLM call.
+# MAGIC
 # MAGIC **What's next — Module 7: RAG over support tickets**
 # MAGIC
 # MAGIC The Vector Search endpoint we kicked off in cell 2 is provisioning in the background. Module 7 will build a Delta Sync index on top of `support_tickets`, assemble a traced RAG chain, and answer churn-driver questions. Open `modules/07_rag_churn_insights/07_rag_churn_insights.py`.
@@ -310,3 +337,4 @@ if len(recent_traces):
 # MAGIC - [MLflow Tracing](https://mlflow.org/docs/latest/genai/tracing/)
 # MAGIC - [Prompt Registry](https://mlflow.org/docs/latest/genai/prompt-registry/)
 # MAGIC - [Foundation Model APIs — supported models](https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/supported-models)
+# MAGIC - [FMAPI rate limits](https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/limits)

@@ -12,6 +12,20 @@
 # MAGIC
 # MAGIC No new APIs — everything you've learned, stitched together.
 # MAGIC
+# MAGIC **Databricks features showcased** (the union of everything we've used)
+# MAGIC
+# MAGIC - **`mlflow.pyfunc.spark_udf(model_uri=models:/.../@champion)`** — load the registered champion model as a Spark UDF and score all customers in one distributed pass. Same alias-based URI Module 4 used; transparent to model-version updates.
+# MAGIC - **Model Serving REST endpoint** (M4) — invoked here via `mlflow.deployments.get_deploy_client("databricks").predict(endpoint=..., inputs=...)` for ad-hoc requests; the same endpoint a real-time renewal flow would call.
+# MAGIC - **Deployed agent endpoint** (M8) — invoked per top-K customer. With `scale_to_zero_enabled=True`, the first call after idle triggers a cold-start; subsequent calls are fast. Real production cost model: pay for inference, not for idle.
+# MAGIC - **`@mlflow.trace(name="capstone_call_agent")` per customer** — one named trace span per top-10 customer; the underlying agent + tool + LLM calls nest underneath. Trace tab becomes the per-customer debugging surface.
+# MAGIC - **Local-agent fallback** — if the deployed endpoint is down, `call_agent` automatically falls back to the locally-loaded copy of the same logged model. Same code, same artifacts, zero-downtime degradation.
+# MAGIC - **`mlflow.openai.autolog()`** — captures every OpenAI/FMAPI call inside the agent loop, so the trace shows tool-call → openai.chat.completions → response.
+# MAGIC - **Delta as durable output** — the `capstone_retention_emails` table holds the drafted outputs; downstream the CS team can query it, the Review App can surface it, and analytics can compute conversion rate of drafts → approvals → opens.
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC This module *is* the production retention pipeline. Schedule it as a Databricks Job to run nightly (or on customer-event triggers), wire the output Delta table into Salesforce / Iterable for the actual send (after Review-App approval), and the loop closes: M5 detects drift → triggers M2/M3 retraining → promotes a new `@champion` → next M10 run picks it up automatically via the alias. bolttech's retention team gets a self-healing personalization engine that the data + compliance teams can both audit.
+# MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
 # MAGIC - Modules 4 and 8 have been run, and **both their serving endpoints are READY**.
@@ -305,6 +319,40 @@ print(f"Saved to {FULL_SCHEMA}.capstone_retention_emails")
 # MAGIC
 # MAGIC The thread holding it all together: MLflow 3's `LoggedModel`, Prompt Registry, Tracing, and the new `mlflow.genai.evaluate` — plus Databricks Unity Catalog as the durable home for data, features, models, prompts, and inference traces.
 # MAGIC
-# MAGIC When you're done playing, `scripts/reset_workshop.py` tears it all down for a clean re-run.
+# MAGIC ## What you'd build without Databricks (the full stack)
+# MAGIC
+# MAGIC | Layer | DIY ingredients | Databricks-native equivalent |
+# MAGIC | --- | --- | --- |
+# MAGIC | Data + governance | Snowflake / S3 + dbt + Collibra + custom lineage tracker | Unity Catalog + Delta Lake |
+# MAGIC | Feature store | Feast / Tecton + Postgres + custom backfill | Feature Engineering in UC |
+# MAGIC | Experiment tracking | Self-hosted MLflow / W&B / Neptune | Managed MLflow 3, integrated |
+# MAGIC | Model registry | MLflow registry + custom aliases / promotion workflow | UC Model Registry with `@champion`/`@challenger` |
+# MAGIC | Model serving | SageMaker / Triton / FastAPI on K8s + autoscaler + monitoring | Databricks Model Serving (scale-to-zero) |
+# MAGIC | Drift monitoring | Evidently / WhyLabs + custom pipeline + Grafana | Lakehouse Monitoring + MLflow time-series |
+# MAGIC | LLM provider | OpenAI / Anthropic vendor accounts + key vault + billing isolation | Foundation Model APIs (FMAPI) |
+# MAGIC | Vector DB | Pinecone / Weaviate + custom embedding worker + sync job | Vector Search Delta Sync with managed embeddings |
+# MAGIC | Prompt management | Prompts in Git + custom loader + bespoke aliasing | MLflow Prompt Registry |
+# MAGIC | LLM tracing | Langfuse / Helicone / Arize Phoenix — separate stack | `mlflow.<provider>.autolog()` — one line, same UI |
+# MAGIC | Agent framework | LangChain + custom serving wrapper + auth plumbing | `mlflow.pyfunc.ResponsesAgent` + `agents.deploy()` |
+# MAGIC | Human-in-the-loop UI | Build a Streamlit / React review app | Databricks Review App (auto-provisioned) |
+# MAGIC | GenAI eval framework | DeepEval / Ragas + custom orchestration | `mlflow.genai.evaluate` |
+# MAGIC | Orchestration | Airflow / Dagster / Prefect | Databricks Jobs |
+# MAGIC | Alerts on data/model/cost | PagerDuty + custom integrations | Databricks SQL Alerts |
+# MAGIC
+# MAGIC That's **~15 separate vendors / OSS stacks** vs **one integrated platform** with consistent auth, governance, and lineage from raw data through customer-facing GenAI output.
+# MAGIC
+# MAGIC ## Production pattern (where this goes next for bolttech)
+# MAGIC
+# MAGIC 1. **Daily Databricks Job** scheduled at 03:00 SGT: setup → feature refresh → batch score → top-K → agent drafts → land in `capstone_retention_emails`.
+# MAGIC 2. **Inference table** auto-captured by the deployed agent endpoint feeds the Review App where the CS team approves drafts (queue ~50-100/day).
+# MAGIC 3. **Approved drafts** flow via an outbound connector to Salesforce / Iterable / your ESP for actual send.
+# MAGIC 4. **Weekly drift Job** (M5 logic) on the inference table; SQL Alert fires Slack when KS p-value drops below threshold on any feature.
+# MAGIC 5. **On drift alert**, a chained Job re-runs M2/M3 (training) → M4 (re-register + promote new `@champion`) → next M10 picks up automatically via alias resolution.
+# MAGIC 6. **Prompt iteration** (M9 loop): data scientists iterate on prompt versions in a notebook, register new versions, run `mlflow.genai.evaluate` against the regression set. CI blocks promotion to `@production` unless eval metrics meet threshold. On promotion, the deployed agent picks up the new prompt on next call — no redeploy.
+# MAGIC 7. **Compliance + audit**: every interaction (input, agent reasoning trace, output, human approval decision) is queryable from Unity Catalog tables. Quarterly compliance review = a Databricks SQL query, not a quarter-long forensic exercise.
+# MAGIC
+# MAGIC ## When you're done
+# MAGIC
+# MAGIC `scripts/reset_workshop.py` tears it all down for a clean re-run.
 # MAGIC
 # MAGIC **Thanks for working through this — happy MLflow-ing.**

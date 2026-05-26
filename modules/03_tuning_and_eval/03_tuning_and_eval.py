@@ -11,6 +11,17 @@
 # MAGIC - Use **`mlflow.evaluate`** to compute classification metrics + a **custom business metric** (expected retention value), and bind the eval results to the LoggedModel via the new `model_id=` parameter.
 # MAGIC - See first-hand the MLflow 3 breaking change `baseline_model=` was removed from `mlflow.evaluate` — and what to do instead.
 # MAGIC
+# MAGIC **Databricks features showcased**
+# MAGIC
+# MAGIC - **Nested MLflow runs** for HPO — every Optuna trial gets its own MLflow run under a parent study run, so the experiment UI gives you a one-click view of "all 15 trials and their AUCs."
+# MAGIC - **`mlflow.evaluate(model_id=...)`** — MLflow 3's evaluation primitive that binds metrics, tables, and dataset references to a specific `LoggedModel`, not just a run.
+# MAGIC - **Custom business metrics** via `mlflow.metrics.make_metric(eval_fn=..., greater_is_better=...)` — pluggable into the `extra_metrics=[...]` parameter alongside MLflow's builtin classification suite.
+# MAGIC - **Optuna + MLflow** integration — `optuna.create_study(...)` running inside a `with mlflow.start_run(nested=True)` block; no third-party glue required.
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC AUC alone doesn't tell you the dollar impact of a retention campaign. Two models with identical AUC can produce wildly different retention-program economics depending on their precision/recall mix and the cost of false positives (outreach spend on customers who weren't actually going to churn). The `expected_retention_value` metric below codifies bolttech's actual unit economics — average LTV, intervention success rate, outreach cost — and lets the team pick the model that maximizes *campaign profit*, not just classification accuracy. That custom metric becomes a first-class part of the model's MLflow record alongside AUC, so model approvers see both numbers side by side.
+# MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
 # MAGIC - Modules 0, 1, 2 have been run.
@@ -103,6 +114,8 @@ print(f"Baseline LGBM model_id (from Module 2): {baseline_model_id}")
 # MAGIC ## 3. Define the Optuna objective with nested MLflow runs
 # MAGIC
 # MAGIC Each Optuna trial is one `mlflow.start_run(nested=True)`. We manually `log_params` and `log_metric` — Optuna doesn't yet have a first-party MLflow autolog hook in DBR 17.3 LTS ML's environment, so the manual logging here is also pedagogically useful (shows what autolog does under the hood).
+# MAGIC
+# MAGIC **The MLflow UI payoff:** open the experiment, expand the `lgbm_tuning_study` parent run, and you'll see 15 child runs as a sortable table — params on the left, `test_auc` on the right, sparkline of best-AUC-over-time at the top. No custom HPO dashboard to build. The same pattern works for Hyperopt, Ray Tune, or any other HPO library that lets you control the inner training loop.
 
 # COMMAND ----------
 
@@ -268,6 +281,8 @@ expected_retention_value = make_metric(
 # MAGIC
 # MAGIC The MLflow 3 `model_id=` parameter is the key here — it attaches the evaluation metrics, tables, and dataset reference to the LoggedModel rather than just to a run. That gives us per-model lineage that survives across runs.
 # MAGIC
+# MAGIC **Why this matters in practice.** When Module 4 promotes this LoggedModel to `@champion` in UC, the eval metrics travel with it automatically — UC Catalog Explorer shows the same `expected_retention_value` we just logged. When Module 9 runs `mlflow.genai.evaluate` against an agent that uses this model, those eval results also bind to a LoggedModel. The model identity is the lineage spine: every metric, every dataset, every downstream evaluation is anchored to a single addressable entity. Re-evaluate the same model on new data later? Pass the same `model_id=` and the new metrics append to the LoggedModel's history.
+# MAGIC
 # MAGIC Ref: https://mlflow.org/docs/latest/api_reference/python_api/mlflow.models.html
 
 # COMMAND ----------
@@ -369,6 +384,14 @@ display(spark.table(STATE_TABLE))
 # MAGIC - Custom business metrics via `mlflow.metrics.make_metric(eval_fn=..., greater_is_better=...)` plug straight into `extra_metrics=[...]` on `mlflow.evaluate`.
 # MAGIC - `baseline_model=` was removed from `mlflow.evaluate` in MLflow 3. Side-by-side comparisons are now done by loading both LoggedModels by `model_id` and computing the comparison yourself.
 # MAGIC
+# MAGIC **What you'd build without Databricks**
+# MAGIC
+# MAGIC Wire your own HPO tracking dashboard against Optuna's `study.trials_dataframe()`, build a separate metrics store for business KPIs so they don't get lost in spreadsheets, run a homegrown lineage tracker so the eval results attach to a versioned model artifact, and re-implement the "load two model versions side-by-side" pattern every time. With MLflow 3 the nested-runs UI, the custom-metric plumbing, and the LoggedModel-bound eval lineage are one API surface.
+# MAGIC
+# MAGIC **How this composes in production**
+# MAGIC
+# MAGIC The `lgbm_tuned_model_id` you just persisted is what Module 4 promotes to UC as `<schema>.bolttech_churn_lgbm@champion`. The `expected_retention_value` metric you computed travels with the model — when Module 5 monitors the production endpoint, you can compare drift against this metric ("did campaign ROI drop after the drift event?") rather than just against AUC. In a real retraining pipeline, this notebook would be a Job task that fires nightly, the `champion` alias auto-promotes only if the new tuned model beats the current one on `expected_retention_value`, and the whole thing is one DAG.
+# MAGIC
 # MAGIC **What's next — Module 4: UC Registry + Model Serving**
 # MAGIC
 # MAGIC Module 4 registers the tuned model in Unity Catalog, sets `@champion` / `@challenger` aliases, and provisions a Model Serving endpoint. Open `modules/04_registry_and_serving/04_registry_and_serving.py`.
@@ -377,3 +400,4 @@ display(spark.table(STATE_TABLE))
 # MAGIC - [`mlflow.evaluate` reference](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.models.html)
 # MAGIC - [Custom metrics](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.metrics.html)
 # MAGIC - [Optuna + MLflow](https://optuna.readthedocs.io/en/stable/reference/integration.html)
+# MAGIC - [Hyperparameter tuning on Databricks](https://docs.databricks.com/aws/en/machine-learning/automl-hyperparam-tuning/)

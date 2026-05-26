@@ -15,6 +15,19 @@
 # MAGIC - See how the `predict_fn` contract works (kwargs unpacked from `inputs`).
 # MAGIC - Demonstrate the **prompt iteration loop**: tweak a registered prompt, re-evaluate, compare runs in the MLflow UI.
 # MAGIC
+# MAGIC **Databricks features showcased**
+# MAGIC
+# MAGIC - **`mlflow.genai.evaluate(data, predict_fn, scorers)`** — the unified MLflow 3 GenAI eval entry point. Replaces the old `mlflow.evaluate(model_type='databricks-agent')` pattern from MLflow 2.x. Same call works for a deployed endpoint, a locally-loaded agent, or a plain function — eval dataset → predict function → scorers → run.
+# MAGIC - **Built-in LLM-as-judge scorers** — `Correctness()` (matches against `expected_facts`), `Safety()` (Databricks-managed PII / harm checks), `RetrievalGroundedness()`, `RelevanceToQuery()`, `Guidelines(name=..., guidelines=...)` (configurable natural-language rules). Each runs an LLM judgment per row and emits a structured Feedback record.
+# MAGIC - **Custom `Guidelines` scorers** — codify domain-specific rules (bolttech brand voice, regulatory forbidden phrases, mandatory disclaimers) as natural-language constraints. The judge is itself an FMAPI call; no scoring infrastructure to build.
+# MAGIC - **Prompt-iteration loop via the Prompt Registry** — register prompt v1 + v2 (Module 6 demonstrated the register/alias pattern), build a `predict_fn` per version, evaluate each. The two eval runs sit side-by-side in the MLflow UI for direct metric comparison.
+# MAGIC - **`@mlflow.trace` per eval row** — wraps each `predict_fn` invocation in a named CHAIN span; the underlying agent / openai-autolog calls nest underneath, giving a tidy trace tree per row. Failed rows show up in the Traces tab with full context for debugging.
+# MAGIC - **Eval datasets as Python modules** — `eval_dataset.py` is version-controlled in the repo. Diff a curated dataset like you'd diff code; reviewer can approve eval-set changes in PRs.
+# MAGIC
+# MAGIC **Why this matters for insurtech**
+# MAGIC
+# MAGIC The single biggest blocker to customer-facing GenAI at regulated insurers is *"how do you know it won't say something it shouldn't?"* `mlflow.genai.evaluate` with `Safety()` + a custom `Guidelines("bolttech_voice", ...)` scorer answers that with: every prompt change, every model swap, every retrieval-corpus update gets a 25-example regression check; results land in the MLflow UI; compliance can audit. The iteration loop matters even more — prompt engineering for production AI is a continuous activity, not a one-shot deploy. Without a structured eval loop, "let's tweak the prompt" becomes a slow chain of bug reports + manual spot-checks. With this pattern, it's a 5-minute CI cycle.
+# MAGIC
 # MAGIC **Prerequisites**
 # MAGIC
 # MAGIC - Modules 6, 7, 8 have been run.
@@ -344,6 +357,21 @@ display(comparison)
 # MAGIC - Three real scorers in action: `Correctness`, `Safety`, and a custom-instantiated `Guidelines`.
 # MAGIC - The **prompt-iteration loop**: register a new prompt version → bump alias → re-evaluate → compare runs in the MLflow UI.
 # MAGIC
+# MAGIC **What you'd build without Databricks**
+# MAGIC
+# MAGIC | Concern | DIY stack | Databricks-native |
+# MAGIC | --- | --- | --- |
+# MAGIC | Eval framework | DeepEval / Ragas / promptfoo — separate library, different schema, different UI | `mlflow.genai.evaluate` — same MLflow you already use; eval runs sit alongside training runs |
+# MAGIC | LLM-as-judge orchestration | Custom prompt + custom OpenAI/Claude call + JSON parse + retry | `Correctness()` / `Safety()` / `Guidelines(...)` — first-class scorer classes |
+# MAGIC | Brand-voice / forbidden-phrase rules | Hand-roll regex checks OR build a custom judge | `Guidelines(name=..., guidelines="natural language rules")` — the judge IS the spec |
+# MAGIC | Per-prompt-version comparison | Custom A/B framework + manual chart | Two `mlflow.start_run` blocks → MLflow UI chart-compare for free |
+# MAGIC | Eval dataset versioning | CSVs in S3 + manual changelog | Python module in the repo → reviewable via PR like any other code |
+# MAGIC | Per-row trace + failure debug | Print statements + grep through logs | Per-row trace in MLflow Traces tab, click any failed row to see full span tree |
+# MAGIC
+# MAGIC **How this composes in production**
+# MAGIC
+# MAGIC Wire this notebook into a Databricks Job that runs on every prompt-registry update (or on a schedule). The eval set grows over time — every customer-reported issue with a retention email becomes a new row in `eval_dataset.py`, with `expectations` codifying "the model should NOT have said X" or "should HAVE included Y". The Job blocks the prompt-alias promotion to `@production` until the new version's eval metrics meet a threshold (CI for prompts). Compliance can review eval results before any new prompt version reaches live customer-facing flows.
+# MAGIC
 # MAGIC **What's next — Module 10: Capstone**
 # MAGIC
 # MAGIC Module 10 stitches everything together: batch-score 100 customers via Module 4's endpoint, rank top-10, invoke the deployed Module 8 agent on each, display the drafted retention emails. Open `modules/10_capstone/10_capstone.py`.
@@ -353,3 +381,4 @@ display(comparison)
 # MAGIC - [Predefined judges](https://mlflow.org/docs/latest/genai/eval-monitor/scorers/llm-judge/predefined/)
 # MAGIC - [Custom scorers](https://mlflow.org/docs/latest/genai/eval-monitor/scorers/custom/)
 # MAGIC - [Agent eval migration notes (2.x → 3.x)](https://docs.databricks.com/aws/en/mlflow3/genai/agent-eval-migration)
+# MAGIC - [LLM-as-judge supported models](https://mlflow.org/docs/latest/genai/eval-monitor/scorers/llm-judge/custom-judges/supported-models/)
