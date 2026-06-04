@@ -72,6 +72,9 @@ from config.workshop_config import (  # noqa: E402
     PAYMENTS_TABLE,
     TICKETS_TABLE,
     SNAPSHOTS_TABLE,
+    EXPERIMENT_PATH,
+    MONITORING_WAREHOUSE_ID,
+    TRACE_TABLE_PREFIX,
     SYNTHETIC_SEED,
     N_CUSTOMERS,
     N_TICKETS,
@@ -95,6 +98,71 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {FULL_SCHEMA}")
 spark.sql(f"USE CATALOG {CATALOG}")
 spark.sql(f"USE SCHEMA {SCHEMA}")
 print(f"Using {FULL_SCHEMA}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 3b. (Optional) Enable Unity Catalog trace storage + production monitoring
+# MAGIC
+# MAGIC The GenAI experiment's **Overview** dashboards (Usage / Quality / Tool calls) are powered by
+# MAGIC **Unity Catalog trace storage**, not the default control-plane trace store. To light them up,
+# MAGIC the experiment must be created **UC-backed before its first trace** — which is exactly why this
+# MAGIC runs here in Module 0, before any module logs a trace.
+# MAGIC
+# MAGIC This is **opt-in and off by default**. It only runs when `MONITORING_WAREHOUSE_ID` is set in
+# MAGIC `config/workshop_config.py` (or as an env var). When unset, the workshop runs end-to-end on the
+# MAGIC default trace store: the **Traces tab** still works, only the aggregate Overview charts stay empty.
+# MAGIC Once enabled, Module 9 §9's scheduled scorers feed the **Quality** tab and these traces feed **Usage**.
+# MAGIC
+# MAGIC Prereqs when enabled: a SQL warehouse the runner can use + the workspace's trace-storage preview
+# MAGIC features on. Ref: https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog
+
+# COMMAND ----------
+
+# Ref: https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog
+if not MONITORING_WAREHOUSE_ID:
+    print(
+        "MONITORING_WAREHOUSE_ID not set — skipping UC trace storage / production monitoring.\n"
+        "The workshop runs normally on the default trace store (Traces tab works; the aggregate\n"
+        "Overview dashboards stay empty). Set MONITORING_WAREHOUSE_ID in config/workshop_config.py\n"
+        "(or as an env var) to enable them."
+    )
+else:
+    import mlflow
+
+    mlflow.set_tracking_uri("databricks")
+
+    # Bind the experiment to UC trace storage. A UC destination can ONLY be attached to an
+    # experiment that has zero traces — so this must happen before Module 6 logs the first trace.
+    try:
+        from mlflow.entities.trace_location import UnityCatalog
+
+        _exp = mlflow.set_experiment(
+            experiment_name=EXPERIMENT_PATH,
+            trace_location=UnityCatalog(
+                catalog_name=CATALOG,
+                schema_name=SCHEMA,
+                table_prefix=TRACE_TABLE_PREFIX,
+            ),
+        )
+        print(
+            f"UC trace storage bound: experiment {_exp.experiment_id} -> "
+            f"{FULL_SCHEMA}.{TRACE_TABLE_PREFIX}_*"
+        )
+    except Exception as exc:
+        # Most common cause on a re-run: the experiment already contains traces. A UC destination
+        # cannot be bound retroactively — reset the experiment (delete it) before re-enabling.
+        print(f"Could not bind UC trace storage (continuing on default store): {exc}")
+        mlflow.set_experiment(EXPERIMENT_PATH)
+
+    # Point the monitoring job at a SQL warehouse so the Overview dashboards can query UC traces.
+    try:
+        from mlflow.tracing import set_databricks_monitoring_sql_warehouse_id
+
+        set_databricks_monitoring_sql_warehouse_id(sql_warehouse_id=MONITORING_WAREHOUSE_ID)
+        print(f"Monitoring SQL warehouse set: {MONITORING_WAREHOUSE_ID}")
+    except Exception as exc:
+        print(f"Could not set monitoring SQL warehouse: {exc}")
 
 # COMMAND ----------
 

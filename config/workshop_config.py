@@ -120,6 +120,27 @@ AGENT_ENDPOINT: Final[str] = f"bolttech_agent_{USER_SLUG}"
 # All modules — MLflow experiment path (per-user workspace path)
 EXPERIMENT_PATH: Final[str] = f"/Users/{USER_EMAIL}/mlflow3_workshop"
 
+# ---------------------------------------------------------------------------
+# Observability — Unity Catalog trace storage + production monitoring (opt-in)
+# ---------------------------------------------------------------------------
+#
+# The GenAI experiment's Overview dashboards (Usage / Quality / Tool calls) are powered
+# by **Unity Catalog trace storage**, NOT the default control-plane trace store. To light
+# them up, the experiment must be created UC-backed BEFORE its first trace (Module 0 does
+# this) and a SQL warehouse must be configured for the monitoring queries.
+#
+# This is OPT-IN and OFF by default. Set MONITORING_WAREHOUSE_ID (via the `MONITORING_WAREHOUSE_ID`
+# env var, or edit the default below) to a SQL warehouse ID to enable UC trace storage +
+# the production-monitoring dashboard. Leave it empty to run the workshop anywhere with the
+# default trace store — the Traces tab still works; only the aggregate Overview charts need
+# UC storage.
+#
+# Prerequisites when enabled: MLflow 3.11+, a UC-enabled workspace, a SQL warehouse the
+# runner can use, and the workspace's trace-storage preview features turned on.
+# Ref: https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog
+MONITORING_WAREHOUSE_ID: Final[str] = os.environ.get("MONITORING_WAREHOUSE_ID", "")
+TRACE_TABLE_PREFIX: Final[str] = "mlflow_traces"  # UC Delta table prefix for OTel traces
+
 # Synthetic data params (Module 0)
 SYNTHETIC_SEED: Final[int] = 42
 N_CUSTOMERS: Final[int] = 20_000
@@ -150,6 +171,7 @@ def print_config() -> None:
         "CHAT_MODEL": CHAT_MODEL,
         "EMBEDDING_MODEL": EMBEDDING_MODEL,
         "EXPERIMENT_PATH": EXPERIMENT_PATH,
+        "MONITORING_WAREHOUSE_ID": MONITORING_WAREHOUSE_ID or "(unset — UC trace monitoring off)",
         "SUMMARY_PROMPT_NAME": SUMMARY_PROMPT_NAME,
         "RAG_PROMPT_NAME": RAG_PROMPT_NAME,
         "EMAIL_PROMPT_NAME": EMAIL_PROMPT_NAME,

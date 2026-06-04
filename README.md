@@ -52,6 +52,7 @@ A workspace and a few permissions:
   - Ability to create Model Serving endpoints (Modules 4, 8) and Vector Search endpoints / indexes (Modules 6, 7).
 - [ ] **Rate-limit headroom** — FMAPI is 200K input / 20K output tokens per minute per workspace. For a group session, scope to ≤10 participants on a single workspace.
 - [ ] **Roughly 60 minutes** of clock time. The workshop budget breakdown is in [`PLAN.md`](./PLAN.md) §4.
+- [ ] **(Optional) Production-monitoring dashboard** — to populate the GenAI experiment's **Overview** charts (Usage / Quality / Tool calls), set `MONITORING_WAREHOUSE_ID` in `config/workshop_config.py` to a SQL warehouse ID. This turns on **Unity Catalog trace storage** (bound in Module 0, before the first trace) and requires the workspace's trace-storage preview features. Off by default — the core workshop and the Traces tab work without it.
 
 ---
 
@@ -143,6 +144,9 @@ The VS endpoint may have failed to provision. **Fix:** check the endpoint state 
 
 ### 5. `agents.deploy()` fails with `unrecognized keyword argument`
 The `databricks-agents` SDK version on your workspace has a different signature than what we passed. **Fix:** Module 8 already wraps the call in `try/except TypeError` and retries with the minimal call signature. If that also fails, run `%pip show databricks-agents` to verify the version and check the [agent-framework docs](https://docs.databricks.com/aws/en/generative-ai/agent-framework/deploy-agent) for current signature.
+
+### 6. GenAI experiment **Overview** tab shows `Traces: 0` / `Errors: 0`
+The Overview dashboards (Usage / Quality / Tool calls) read from **Unity Catalog trace storage**, not the default control-plane store — so the Traces *tab* can be full while the Overview *charts* read 0. **Fix:** set `MONITORING_WAREHOUSE_ID` in `config/workshop_config.py` to a SQL warehouse ID **before running Module 0** (a UC trace destination can only bind to a trace-free experiment, so it must be set up before the first trace). If the experiment already has traces, delete it and re-run from Module 0. See [Store MLflow traces in Unity Catalog](https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog).
 
 ---
 

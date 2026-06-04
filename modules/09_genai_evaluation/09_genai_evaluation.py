@@ -368,7 +368,9 @@ display(comparison)
 # MAGIC
 # MAGIC Everything above is **offline / on-demand** evaluation — you call `mlflow.genai.evaluate(...)` and it logs an Evaluation run. **Production monitoring** is the always-on counterpart: you *schedule* the same scorers to run automatically on a sample of the traces your app produces. Results then stream into the experiment's **monitoring dashboard** (the summary / "Overview"-style quality view) and attach as assessments on individual traces.
 # MAGIC
-# MAGIC Two-step lifecycle: **`scorer.register(name=...)`** then **`scorer.start(sampling_config=...)`**. After that, incoming traces are sampled and judged automatically. This is what fills the dashboard — *traces alone don't populate it; scheduled scorers do.*
+# MAGIC Two-step lifecycle: **`scorer.register(name=...)`** then **`scorer.start(sampling_config=...)`**. After that, incoming traces are sampled and judged automatically. This is what fills the dashboard's **Quality** tab — *raw traces alone don't populate it; scheduled scorers do.*
+# MAGIC
+# MAGIC > **Prerequisite — Unity Catalog trace storage.** The Overview dashboards (Usage / Quality / Tool calls) read from **UC trace storage**, not the default trace store. Module 0 binds the experiment to UC storage and sets the monitoring SQL warehouse **when `MONITORING_WAREHOUSE_ID` is configured** (off by default — see `config/workshop_config.py`). If it wasn't set, the scorer assessments below still attach to each trace (visible in the Traces tab), but the aggregate Overview charts stay empty because there's no UC-backed trace data to aggregate.
 # MAGIC
 # MAGIC > **Instructor note — pre-stage / talk-track item, NOT a live-run step.** Scheduled scorers process traces **asynchronously (~15-20 min)** and add FMAPI judge cost, so the dashboard will not light up during the live session. Run this ~30 min *before* the workshop so the dashboard is populated when you demo it, then narrate it as "the same scorers from §4, now running continuously in production — the GenAI counterpart to Module 5's drift monitoring." Cleanup snippet is two cells down.
 # MAGIC
