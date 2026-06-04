@@ -144,6 +144,38 @@ for prompt_name in (SUMMARY_PROMPT_NAME, RAG_PROMPT_NAME, EMAIL_PROMPT_NAME):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Step 4b — Scheduled scorers (Module 9 production monitoring)
+# MAGIC
+# MAGIC Stops + deletes any scheduled scorers registered on the workshop experiment by Module 9 §9
+# MAGIC (`prod_safety`, `prod_bolttech_voice`, or any others). Idempotent — no-op if none exist.
+
+# COMMAND ----------
+
+# Ref: https://docs.databricks.com/aws/en/mlflow3/genai/eval-monitor/concepts/production-quality-monitoring
+try:
+    import mlflow
+    from config.workshop_config import EXPERIMENT_PATH  # scheduled scorers are experiment-scoped
+
+    mlflow.set_experiment(EXPERIMENT_PATH)
+    from mlflow.genai.scorers import list_scorers, delete_scorer
+
+    for _sc in list_scorers():
+        try:
+            if hasattr(_sc, "stop"):
+                _sc.stop()
+        except Exception as exc:
+            print(f"  stop skipped for {_sc.name}: {exc}")
+        try:
+            delete_scorer(name=_sc.name)
+            print(f"  Deleted scheduled scorer: {_sc.name}")
+        except Exception as exc:
+            print(f"  Skipped scorer {_sc.name}: {exc}")
+except Exception as exc:
+    print(f"  Scorer cleanup skipped (API unavailable or none registered): {exc}")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Step 5 — Lakehouse monitor
 
 # COMMAND ----------

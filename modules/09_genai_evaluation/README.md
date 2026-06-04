@@ -15,6 +15,7 @@ This module uses the **locally-loaded** agent (not the deployed endpoint) so the
   - `RelevanceToQuery()` — response relevance
 - Custom `Guidelines(name="bolttech_voice", guidelines="...")` scorer for bolttech-specific tone rules
 - Prompt iteration: bump the registered prompt to v2 → re-run eval → compare runs in the MLflow UI
+- **(Optional §9) Production monitoring** — `scorer.register(name=...).start(sampling_config=ScorerSamplingConfig(...))` schedules the same scorers to run continuously on a sample of incoming traces, populating the experiment's quality dashboard. Async (~15-20 min) + adds judge cost — pre-stage before a live session; teardown is in `scripts/reset_workshop.py`
 
 **Files in this folder**
 - `09_genai_evaluation.py` — driver notebook

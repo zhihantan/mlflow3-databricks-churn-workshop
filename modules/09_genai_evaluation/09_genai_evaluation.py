@@ -39,7 +39,7 @@
 # MAGIC
 # MAGIC - Modules 6, 7, 8 have been run.
 # MAGIC
-# MAGIC **Expected runtime**: ~5-6 minutes (25 examples × ~3 scorer judgments per example).
+# MAGIC **Expected runtime**: ~5-6 minutes (25 examples × ~3 scorer judgments per example). The optional §9 production-monitoring section adds ~1 min to run, but its dashboard populates asynchronously (~15-20 min) — pre-stage it before a live session rather than running it inline.
 # MAGIC
 # MAGIC **Compute**: Serverless or DBR 17.3 LTS ML.
 
@@ -364,6 +364,109 @@ display(comparison)
 
 # MAGIC %md
 # MAGIC ---
+# MAGIC ## 9. (Optional) Production monitoring — populate the quality dashboard
+# MAGIC
+# MAGIC Everything above is **offline / on-demand** evaluation — you call `mlflow.genai.evaluate(...)` and it logs an Evaluation run. **Production monitoring** is the always-on counterpart: you *schedule* the same scorers to run automatically on a sample of the traces your app produces. Results then stream into the experiment's **monitoring dashboard** (the summary / "Overview"-style quality view) and attach as assessments on individual traces.
+# MAGIC
+# MAGIC Two-step lifecycle: **`scorer.register(name=...)`** then **`scorer.start(sampling_config=...)`**. After that, incoming traces are sampled and judged automatically. This is what fills the dashboard — *traces alone don't populate it; scheduled scorers do.*
+# MAGIC
+# MAGIC > **Instructor note — pre-stage / talk-track item, NOT a live-run step.** Scheduled scorers process traces **asynchronously (~15-20 min)** and add FMAPI judge cost, so the dashboard will not light up during the live session. Run this ~30 min *before* the workshop so the dashboard is populated when you demo it, then narrate it as "the same scorers from §4, now running continuously in production — the GenAI counterpart to Module 5's drift monitoring." Cleanup snippet is two cells down.
+# MAGIC
+# MAGIC Refs:
+# MAGIC - https://docs.databricks.com/aws/en/mlflow3/genai/eval-monitor/production-monitoring
+# MAGIC - https://docs.databricks.com/aws/en/mlflow3/genai/eval-monitor/concepts/production-quality-monitoring
+
+# COMMAND ----------
+
+# Ref: https://docs.databricks.com/aws/en/mlflow3/genai/eval-monitor/production-monitoring
+import mlflow
+from mlflow.genai.scorers import Safety, Guidelines, ScorerSamplingConfig
+
+# Scheduled scorers are scoped to the ACTIVE experiment.
+mlflow.set_experiment(EXPERIMENT_PATH)
+
+# Score 100% of sampled traffic so the workshop dashboard fills fast.
+# In real production you'd sample (e.g. 0.1-0.7) to control LLM-judge cost.
+MONITOR_SAMPLE_RATE = 1.0
+
+# Idempotent: skip scorers already registered on this experiment so re-runs are safe.
+try:
+    from mlflow.genai.scorers import list_scorers, get_scorer
+    _existing = {s.name for s in list_scorers()}
+except Exception as exc:  # pragma: no cover — defensive across minor API revs
+    print(f"(list_scorers unavailable: {exc}); proceeding without dedupe")
+    _existing, get_scorer = set(), None
+
+
+def _ensure_monitor(scorer_obj, register_name):
+    """Register (if new) + schedule a scorer; safe to re-run."""
+    if register_name in _existing and get_scorer is not None:
+        print(f"  '{register_name}' already registered — reusing")
+        sc = get_scorer(name=register_name)
+    else:
+        try:
+            sc = scorer_obj.register(name=register_name)
+            print(f"  registered '{register_name}'")
+        except Exception as exc:
+            print(f"  register '{register_name}' skipped ({exc}); attempting reuse")
+            sc = get_scorer(name=register_name) if get_scorer else scorer_obj
+    try:
+        sc = sc.start(sampling_config=ScorerSamplingConfig(sample_rate=MONITOR_SAMPLE_RATE))
+        print(f"  scheduled '{register_name}' @ sample_rate={MONITOR_SAMPLE_RATE}")
+    except Exception as exc:
+        print(f"  '{register_name}' already scheduled / start skipped: {exc}")
+    return sc
+
+
+# Schedule the same two judges we used offline above (Safety + the bolttech-voice Guidelines).
+safety_monitor = _ensure_monitor(Safety(), "prod_safety")
+voice_monitor = _ensure_monitor(
+    Guidelines(name="bolttech_voice", guidelines=BOLTTECH_VOICE_GUIDELINES),
+    "prod_bolttech_voice",
+)
+
+print("\nScheduled scorers now active on this experiment:")
+try:
+    for s in list_scorers():
+        print(f"  - {s.name}: sample_rate={getattr(s, 'sample_rate', '?')}")
+except Exception as exc:
+    print(f"  (list unavailable: {exc})")
+
+# COMMAND ----------
+
+# Scheduled scorers judge INCOMING traces — emit a handful of fresh traces now to give the
+# monitors something to sample. Assessments + dashboard charts surface asynchronously (~15-20 min).
+mlflow.openai.autolog()
+
+_sample_msgs = [ex["inputs"]["message"] for ex in EVAL_DATASET[:8]]
+for i, _msg in enumerate(_sample_msgs):
+    try:
+        predict_v2(message=_msg)  # traced prompt-only fn from §7
+        print(f"  emitted monitor trace {i + 1}/{len(_sample_msgs)}")
+    except Exception as exc:
+        print(f"  trace {i + 1} skipped: {exc}")
+
+print(
+    "\nMonitors scheduled. Open the experiment's monitoring dashboard in ~15-20 min to see "
+    "quality trends; assessments will also attach to these traces in the Traces tab."
+)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Cleanup** — stop monitoring and remove the scheduled scorers when tearing down:
+# MAGIC
+# MAGIC ```python
+# MAGIC from mlflow.genai.scorers import delete_scorer
+# MAGIC safety_monitor.stop(); voice_monitor.stop()
+# MAGIC delete_scorer(name="prod_safety")
+# MAGIC delete_scorer(name="prod_bolttech_voice")
+# MAGIC ```
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ---
 # MAGIC ## Recap & handoff
 # MAGIC
 # MAGIC **What you just learned**
@@ -372,6 +475,7 @@ display(comparison)
 # MAGIC - The eval dataset schema: each row has `inputs` (kwargs for `predict_fn`) + optional `expectations` (used by judges like `Correctness`).
 # MAGIC - Three real scorers in action: `Correctness`, `Safety`, and a custom-instantiated `Guidelines`.
 # MAGIC - The **prompt-iteration loop**: register a new prompt version → bump alias → re-evaluate → compare runs in the MLflow UI.
+# MAGIC - **(Optional §9) Production monitoring**: `scorer.register(...).start(sampling_config=...)` schedules the same scorers to run continuously on live traces, populating the experiment's quality dashboard — the GenAI counterpart to Module 5's drift monitoring.
 # MAGIC
 # MAGIC **What you'd build without Databricks**
 # MAGIC
