@@ -67,8 +67,11 @@ def _sanitize_for_uc(s: str) -> str:
 USER_EMAIL: Final[str] = _current_user()
 USER_SLUG: Final[str] = _sanitize_for_uc(USER_EMAIL.split("@")[0])
 
-# UC catalog/schema — workshop locks catalog name to `bolttech_workshop` (Q4 default)
-CATALOG: Final[str] = "bolttech_workshop"
+# UC catalog/schema. Default catalog is the generic workshop catalog `bolttech_workshop`.
+# Override it WITHOUT editing code by setting the `WORKSHOP_CATALOG` env var — e.g. a customer
+# pointing the workshop at an existing catalog in their own workspace. The per-user schema
+# (`churn_<user>`) keeps participants from colliding on a shared workspace.
+CATALOG: Final[str] = os.environ.get("WORKSHOP_CATALOG", "bolttech_workshop")
 SCHEMA: Final[str] = f"churn_{USER_SLUG}"
 FULL_SCHEMA: Final[str] = f"{CATALOG}.{SCHEMA}"
 

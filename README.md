@@ -74,7 +74,7 @@ Two paths — pick one based on how you want to consume the workshop:
 4. **(Optional) Reset.**
    When you're done playing, run `scripts/reset_workshop.py` to tear down catalog/schema/endpoints/indexes/registered models so you can re-run from scratch.
 
-> Notebooks read identifiers from `config/workshop_config.py` — **don't edit catalog or table names inside the notebooks.** If you want to change the catalog name, edit `config/workshop_config.py` once.
+> Notebooks read identifiers from `config/workshop_config.py` — **don't edit catalog or table names inside the notebooks.** To target a different catalog (e.g. an existing one in your own workspace), set the **`WORKSHOP_CATALOG`** env var — no code edit needed — or change the one default in `config/workshop_config.py`. The catalog defaults to `bolttech_workshop`; `CREATE CATALOG` is best-effort, so the same script also runs against a catalog you already have.
 
 ### B) Deploy the end-to-end validation Job from a notebook (no local CLI required)
 

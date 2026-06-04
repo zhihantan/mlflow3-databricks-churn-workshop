@@ -93,7 +93,14 @@ print_config()
 
 # COMMAND ----------
 
-spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG}")
+# Create the catalog if you have CREATE CATALOG on the metastore. If you're reusing an
+# existing catalog (e.g. a customer-provided one set via WORKSHOP_CATALOG) and lack that
+# permission, this is a best-effort no-op — the per-user schema below is all the workshop
+# needs. This keeps the same deploy script runnable in any customer workspace.
+try:
+    spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG}")
+except Exception as exc:
+    print(f"  CREATE CATALOG skipped — reusing existing catalog '{CATALOG}': {exc}")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {FULL_SCHEMA}")
 spark.sql(f"USE CATALOG {CATALOG}")
 spark.sql(f"USE SCHEMA {SCHEMA}")
