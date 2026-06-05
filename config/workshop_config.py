@@ -144,6 +144,15 @@ EXPERIMENT_PATH: Final[str] = f"/Users/{USER_EMAIL}/mlflow3_workshop"
 MONITORING_WAREHOUSE_ID: Final[str] = os.environ.get("MONITORING_WAREHOUSE_ID", "")
 TRACE_TABLE_PREFIX: Final[str] = "mlflow_traces"  # UC Delta table prefix for OTel traces
 
+# When UC trace storage is enabled, MLflow needs a SQL warehouse to read/write traces in the
+# UC Delta tables from *any* notebook/job session (separate from the monitoring-job warehouse
+# configured in Module 0 via set_databricks_monitoring_sql_warehouse_id). It looks for this
+# env var. Surfacing it here means every module that imports this config can access UC traces
+# (otherwise the first trace in Module 6 fails with "SQL warehouse ID is required for
+# accessing traces in UC tables").
+if MONITORING_WAREHOUSE_ID:
+    os.environ.setdefault("MLFLOW_TRACING_SQL_WAREHOUSE_ID", MONITORING_WAREHOUSE_ID)
+
 # Synthetic data params (Module 0)
 SYNTHETIC_SEED: Final[int] = 42
 N_CUSTOMERS: Final[int] = 20_000
