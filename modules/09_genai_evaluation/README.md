@@ -20,7 +20,7 @@ This module uses the **locally-loaded** agent (not the deployed endpoint) so the
 
 **Files in this folder**
 - `09_genai_evaluation.py` — driver notebook
-- `eval_dataset.py` — 25 hand-curated `{"inputs": ..., "expectations": ...}` examples as a Python module
+- `eval_dataset.py` — eval-set **builder** (`build_examples(customer_ids)`) with the query patterns, `expected_facts`, and bolttech-voice guidelines. Customer IDs are **not hardcoded**: Module 9 derives them at runtime from customers the agent can serve (those with support tickets), so `Correctness` measures response quality rather than a data mismatch
 
 **Prerequisites**
 - Modules 6, 7, 8 have been run.

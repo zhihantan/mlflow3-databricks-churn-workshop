@@ -82,13 +82,51 @@ from config.workshop_config import (  # noqa: E402
     CHURN_ENDPOINT,
     VS_ENDPOINT,
     VS_INDEX,
+    TICKETS_TABLE,
+    N_EVAL_EXAMPLES,
     print_config,
 )
-from eval_dataset import EVAL_DATASET, BOLTTECH_VOICE_GUIDELINES  # noqa: E402
+from eval_dataset import build_examples, BOLTTECH_VOICE_GUIDELINES  # noqa: E402
 
 print_config()
-print(f"\nEval dataset: {len(EVAL_DATASET)} examples")
-print(f"Sample example: {EVAL_DATASET[0]}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Build the eval set from agent-servable customers (derived, not hardcoded)
+# MAGIC
+# MAGIC We pick the eval customers at runtime: those with **support tickets in the Vector Search
+# MAGIC corpus** (so the agent's retrieval tool can surface a *specific* issue), preferring
+# MAGIC at-risk customers. This is the fix for the artificially-low `Correctness` score — hardcoding
+# MAGIC sequential IDs meant the agent had no tickets/features for them and could only write generic
+# MAGIC emails, which the judge correctly failed against the "specific issue from the customer's
+# MAGIC tickets" expectation.
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+# Customers present in the ticket corpus (the VS index is synced from this table).
+_with_tickets = spark.table(TICKETS_TABLE).select("customer_id").distinct()
+
+# Prefer at-risk customers (predicted_churn desc) for a realistic retention scenario, then a
+# stable customer_id tiebreak for determinism. Fall back to any ticketed customer if the
+# batch_predictions table from Module 4 isn't available.
+try:
+    _preds = spark.table(f"{FULL_SCHEMA}.batch_predictions").select("customer_id", "predicted_churn")
+    _candidates = _with_tickets.join(_preds, "customer_id", "left").orderBy(
+        F.col("predicted_churn").desc_nulls_last(), F.col("customer_id")
+    )
+except Exception as exc:  # pragma: no cover — defensive
+    print(f"  (batch_predictions unavailable: {exc}); selecting any ticketed customers")
+    _candidates = _with_tickets.orderBy("customer_id")
+
+eval_ids = [r["customer_id"] for r in _candidates.limit(N_EVAL_EXAMPLES).collect()]
+EVAL_DATASET = build_examples(eval_ids)
+
+print(f"Eval dataset: {len(EVAL_DATASET)} examples over agent-servable (ticketed) customers")
+print(f"  customer IDs: {eval_ids}")
+print(f"  sample example: {EVAL_DATASET[0]}")
 
 # COMMAND ----------
 
