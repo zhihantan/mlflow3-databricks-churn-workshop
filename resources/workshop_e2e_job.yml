@@ -1,7 +1,8 @@
 # MLflow Workshop end-to-end validation Job.
 #
-# Runs all 10 module notebooks in dependency order on Serverless notebook compute.
-# Total expected runtime: ~40-60 min depending on M4 / M8 endpoint cold-start.
+# Runs setup/00 (synthetic data) + all 10 module notebooks in dependency order on
+# Serverless notebook compute. Total expected runtime: ~45-65 min depending on
+# M4 / M8 endpoint cold-start (setup adds ~3 min).
 #
 # Deploy: `databricks bundle deploy --target dev`
 # Run:    `databricks bundle run workshop_e2e`
@@ -38,7 +39,15 @@ resources:
       # was authored against and what the user's workspace mandates.
 
       tasks:
+        # Module 0 — generate the synthetic data + (optionally) bind UC trace storage.
+        # Must run first so Module 1 has the raw Delta tables to build features from.
+        - task_key: module_00_setup
+          notebook_task:
+            notebook_path: ../setup/00_setup_and_synthetic_data.py
+
         - task_key: module_01_feature_engineering
+          depends_on:
+            - task_key: module_00_setup
           notebook_task:
             notebook_path: ../modules/01_feature_engineering/01_feature_engineering.py
 
