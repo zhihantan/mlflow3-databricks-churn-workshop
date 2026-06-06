@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Deploy & Run the Workshop e2e Job
-# MAGIC ### One-click deployment of all 10 workshop modules — no CLI required
+# MAGIC ### One-click deployment of setup/00 + all 10 workshop modules — no CLI required
 # MAGIC
 # MAGIC ---
 # MAGIC
@@ -121,16 +121,16 @@ print(f"Current user:         {w.current_user.me().user_name}")
 
 # MAGIC %md
 # MAGIC ---
-# MAGIC ## Step 3 — Build the 10-task Job spec
+# MAGIC ## Step 3 — Build the 11-task Job spec
 # MAGIC
-# MAGIC Mirrors `resources/workshop_e2e_job.yml` task-for-task. Each task is a `notebook_task` pointing at one workshop module; `depends_on` chains them into a single linear DAG.
+# MAGIC Mirrors `resources/workshop_e2e_job.yml` task-for-task. Each task is a `notebook_task` pointing at one workshop notebook; `depends_on` chains them into a single linear DAG. Module 0 (synthetic data) runs first so Module 1 has tables to read.
 # MAGIC
 # MAGIC ### Task graph
 # MAGIC
 # MAGIC ```
-# MAGIC  M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M8 ─► M9 ─► M10
-# MAGIC  fe    LM    tune  reg   mon   tr    rag  agent eval  capstone
-# MAGIC                          drift  +    + VS  ⏱30m
+# MAGIC  M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M8 ─► M9 ─► M10
+# MAGIC setup  fe    LM    tune  reg   mon   tr    rag  agent eval  capstone
+# MAGIC  data                    drift  +    + VS  ⏱30m
 # MAGIC                                prom
 # MAGIC ```
 # MAGIC
@@ -148,24 +148,26 @@ from databricks.sdk.service.jobs import Task, NotebookTask, TaskDependency
 
 JOB_NAME = "MLFlow Workshop e2e job"
 
-# (task_key, relative notebook path under <repo>/modules/)
-_MODULES = [
-    ("module_01_feature_engineering",   "01_feature_engineering/01_feature_engineering"),
-    ("module_02_experiment_tracking",   "02_experiment_tracking/02_experiment_tracking"),
-    ("module_03_tuning_and_eval",       "03_tuning_and_eval/03_tuning_and_eval"),
-    ("module_04_registry_and_serving",  "04_registry_and_serving/04_registry_and_serving"),
-    ("module_05_monitoring",            "05_monitoring/05_monitoring"),
-    ("module_06_tracing_and_prompts",   "06_tracing_and_prompts/06_tracing_and_prompts"),
-    ("module_07_rag_churn_insights",    "07_rag_churn_insights/07_rag_churn_insights"),
-    ("module_08_retention_agent",       "08_retention_agent/08_retention_agent"),
-    ("module_09_genai_evaluation",      "09_genai_evaluation/09_genai_evaluation"),
-    ("module_10_capstone",              "10_capstone/10_capstone"),
+# (task_key, repo-relative notebook path). Module 0 (synthetic data) lives under setup/;
+# everything else under modules/. Module 0 runs first so Module 1 has tables to read.
+_TASKS = [
+    ("module_00_setup",                 "setup/00_setup_and_synthetic_data"),
+    ("module_01_feature_engineering",   "modules/01_feature_engineering/01_feature_engineering"),
+    ("module_02_experiment_tracking",   "modules/02_experiment_tracking/02_experiment_tracking"),
+    ("module_03_tuning_and_eval",       "modules/03_tuning_and_eval/03_tuning_and_eval"),
+    ("module_04_registry_and_serving",  "modules/04_registry_and_serving/04_registry_and_serving"),
+    ("module_05_monitoring",            "modules/05_monitoring/05_monitoring"),
+    ("module_06_tracing_and_prompts",   "modules/06_tracing_and_prompts/06_tracing_and_prompts"),
+    ("module_07_rag_churn_insights",    "modules/07_rag_churn_insights/07_rag_churn_insights"),
+    ("module_08_retention_agent",       "modules/08_retention_agent/08_retention_agent"),
+    ("module_09_genai_evaluation",      "modules/09_genai_evaluation/09_genai_evaluation"),
+    ("module_10_capstone",              "modules/10_capstone/10_capstone"),
 ]
 
 tasks: list[Task] = []
 _prev_key: str | None = None
-for task_key, subpath in _MODULES:
-    notebook_path = f"{REPO_ROOT_FOR_TASKS}/modules/{subpath}"
+for task_key, subpath in _TASKS:
+    notebook_path = f"{REPO_ROOT_FOR_TASKS}/{subpath}"
     task = Task(
         task_key=task_key,
         notebook_task=NotebookTask(notebook_path=notebook_path),
@@ -264,6 +266,6 @@ print(f"Run URL: {w.config.host}/jobs/{job_id}/runs/{run.run_id}")
 # MAGIC
 # MAGIC - Deployed an end-to-end validation Job using the Databricks Python SDK — zero CLI dependency, zero auth plumbing.
 # MAGIC - Established a re-runnable, idempotent deployment pattern: `jobs.reset()` if exists, `jobs.create()` if not.
-# MAGIC - (Optionally) triggered a run that chains all 10 workshop modules in dependency order on Serverless compute.
+# MAGIC - (Optionally) triggered a run that chains setup/00 + all 10 workshop modules in dependency order on Serverless compute.
 # MAGIC
 # MAGIC Open the Job URL printed above to watch progress, or come back later — the run is detached from this notebook session.
