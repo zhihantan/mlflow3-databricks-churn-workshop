@@ -107,3 +107,7 @@ resources:
             - task_key: module_09_genai_evaluation
           notebook_task:
             notebook_path: ../modules/10_capstone/10_capstone.py
+
+        # NOTE: modules/11_teardown is intentionally NOT a task here. It destroys all
+        # workshop resources and is meant to be run manually, on demand — never chained
+        # into the e2e run (which would nuke the workshop the moment it finished).

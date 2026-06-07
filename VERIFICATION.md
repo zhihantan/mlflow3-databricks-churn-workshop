@@ -100,7 +100,7 @@ These are points where my research left an open question that can only be conclu
 
 To re-run the workshop after a previous run:
 
-1. Run `scripts/reset_workshop.py` to drop catalog/schema/endpoints/indexes/registered models.
+1. Run `modules/11_teardown/11_teardown.py` to drop catalog/schema/endpoints/indexes/registered models + the MLflow experiment.
 2. Re-clone the repo (or `git pull` if you already have it).
 3. Open `setup/00_setup_and_synthetic_data.py` and Run All.
 

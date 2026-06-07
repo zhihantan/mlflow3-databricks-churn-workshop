@@ -162,6 +162,8 @@ _TASKS = [
     ("module_08_retention_agent",       "modules/08_retention_agent/08_retention_agent"),
     ("module_09_genai_evaluation",      "modules/09_genai_evaluation/09_genai_evaluation"),
     ("module_10_capstone",              "modules/10_capstone/10_capstone"),
+    # NOTE: modules/11_teardown is intentionally omitted. It destroys all workshop
+    # resources and is run manually, on demand — never chained into the e2e job.
 ]
 
 tasks: list[Task] = []
@@ -258,7 +260,7 @@ print(f"Run URL: {w.config.host}/jobs/{job_id}/runs/{run.run_id}")
 # MAGIC | What to clean up | How |
 # MAGIC | --- | --- |
 # MAGIC | **The Job itself** | Run this cell: `w.jobs.delete(job_id=job_id)` |
-# MAGIC | **Workshop data resources** (catalog, schema, registered models, serving + VS endpoints) | Run [`scripts/reset_workshop.py`](./reset_workshop.py) — its own notebook with idempotent teardown steps. |
+# MAGIC | **Workshop data resources** (catalog, schema, registered models, serving + VS endpoints, MLflow experiment) | Run [`modules/11_teardown/11_teardown.py`](../modules/11_teardown/11_teardown.py) — the canonical, confirmation-guarded teardown module. |
 # MAGIC
 # MAGIC ---
 # MAGIC

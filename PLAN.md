@@ -338,7 +338,8 @@ mlflow3-databricks-churn-workshop/
 │   ├── research_log.md                # Dated URL log per prompt §7.2
 │   └── images/
 ├── scripts/
-│   └── reset_workshop.py              # Tear down catalog/schema/endpoints/indexes/registered model
+│   └── deploy_workshop_job.py         # In-workspace notebook — deploys bundle + e2e Job
+│                                      # (teardown lives in modules/11_teardown/11_teardown.py)
 └── VERIFICATION.md                    # Self-review report per prompt §7.6
 ```
 

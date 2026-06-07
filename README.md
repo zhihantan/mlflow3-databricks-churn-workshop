@@ -71,8 +71,8 @@ Two paths — pick one based on how you want to consume the workshop:
 3. **Walk through the modules in order.**
    `modules/01_feature_engineering` → `modules/02_experiment_tracking` → … → `modules/10_capstone`. Each module's `README.md` lists prerequisites and expected runtime. Run all cells in each notebook.
 
-4. **(Optional) Reset.**
-   When you're done playing, run `scripts/reset_workshop.py` to tear down catalog/schema/endpoints/indexes/registered models so you can re-run from scratch.
+4. **(Optional) Teardown.**
+   When you're done playing, run `modules/11_teardown/11_teardown.py` to destroy all workshop resources — catalog/schema, endpoints, indexes, registered models, **and the MLflow experiment** (so its path is freed for a clean UC-trace re-bind) — and re-run from scratch.
 
 > Notebooks read identifiers from `config/workshop_config.py` — **don't edit catalog or table names inside the notebooks.** To target a different catalog (e.g. an existing one in your own workspace), set the **`WORKSHOP_CATALOG`** env var — no code edit needed — or change the one default in `config/workshop_config.py`. The catalog defaults to `bolttech_workshop`; `CREATE CATALOG` is best-effort, so the same script also runs against a catalog you already have.
 
@@ -123,6 +123,7 @@ After `deploy` (B or C), the Job appears in the **Workflows** UI as **`[dev <you
 | 8 | Retention agent + deploy | `modules/08_retention_agent/08_retention_agent.py` | ~9 min | `mlflow.pyfunc.ResponsesAgent`; OpenAI Agents SDK; `resources=[...]`; **actual `agents.deploy()`** |
 | 9 | GenAI evaluation | `modules/09_genai_evaluation/09_genai_evaluation.py` | ~5-6 min | `mlflow.genai.evaluate`; `Correctness`, `Safety`, `Guidelines` scorers; prompt iteration loop |
 | 10 | Capstone | `modules/10_capstone/10_capstone.py` | ~3-5 min | End-to-end: batch score → top-10 → deployed agent → drafted emails |
+| 11 | Teardown _(run on demand; **not** in the e2e job)_ | `modules/11_teardown/11_teardown.py` | ~2-4 min | Idempotent destroy of all resources incl. the MLflow experiment; confirmation-widget guarded |
 
 **Total participant runtime budget: ≤60 min.** Detailed budget per module in [`PLAN.md`](./PLAN.md) §4. Actual observed runtimes are tracked in [`VERIFICATION.md`](./VERIFICATION.md).
 
@@ -192,14 +193,14 @@ mlflow3-databricks-churn-workshop/
 │   ├── 07_rag_churn_insights/
 │   ├── 08_retention_agent/  # 08_retention_agent.py + agent.py
 │   ├── 09_genai_evaluation/ # 09_genai_evaluation.py + eval_dataset.py
-│   └── 10_capstone/
+│   ├── 10_capstone/
+│   └── 11_teardown/         # destroy-all module — run on demand, NOT in the e2e job
 ├── docs/
 │   ├── architecture.md      # Mermaid diagrams
 │   ├── instructor_guide.md  # Pacing notes for facilitators
 │   └── research_log.md      # Citation appendix
 └── scripts/
-    ├── deploy_workshop_job.py  # In-workspace notebook — deploys bundle + Job (Quickstart B)
-    └── reset_workshop.py       # Tear down catalog/schema/endpoints for a clean re-run
+    └── deploy_workshop_job.py  # In-workspace notebook — deploys bundle + Job (Quickstart B)
 ```
 
 ---

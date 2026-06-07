@@ -368,6 +368,6 @@ print(f"Saved to {FULL_SCHEMA}.capstone_retention_emails")
 # MAGIC
 # MAGIC ## When you're done
 # MAGIC
-# MAGIC `scripts/reset_workshop.py` tears it all down for a clean re-run.
+# MAGIC `modules/11_teardown/11_teardown.py` tears it all down for a clean re-run.
 # MAGIC
 # MAGIC **Thanks for working through this — happy MLflow-ing.**

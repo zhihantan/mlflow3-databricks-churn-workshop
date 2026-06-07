@@ -15,7 +15,7 @@ This module uses the **locally-loaded** agent (not the deployed endpoint) so the
   - `RelevanceToQuery()` — response relevance
 - Custom `Guidelines(name="bolttech_voice", guidelines="...")` scorer for bolttech-specific tone rules
 - Prompt iteration: bump the registered prompt to v2 → re-run eval → compare runs in the MLflow UI
-- **(Optional §9) Production monitoring** — `scorer.register(name=...).start(sampling_config=ScorerSamplingConfig(...))` schedules the same scorers to run continuously on a sample of incoming traces, feeding the experiment's **Overview → Quality** dashboard. Async (~15-20 min) + adds judge cost — pre-stage before a live session; teardown is in `scripts/reset_workshop.py`.
+- **(Optional §9) Production monitoring** — `scorer.register(name=...).start(sampling_config=ScorerSamplingConfig(...))` schedules the same scorers to run continuously on a sample of incoming traces, feeding the experiment's **Overview → Quality** dashboard. Async (~15-20 min) + adds judge cost — pre-stage before a live session; teardown is in `modules/11_teardown/11_teardown.py`.
   - **Requires Unity Catalog trace storage**, which is set up in **Module 0**. `config/workshop_config.py` auto-resolves a usable SQL warehouse, so this is on by default (pin one with the `MONITORING_WAREHOUSE_ID` env var, or disable with `WORKSHOP_DISABLE_MONITORING=1`). When no warehouse is usable, scorer assessments still attach per-trace (Traces tab), but the aggregate Overview charts (Usage / Quality) stay empty. See [Store MLflow traces in Unity Catalog](https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog).
 
 **Files in this folder**
