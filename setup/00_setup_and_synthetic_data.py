@@ -126,6 +126,10 @@ print(f"Using {FULL_SCHEMA}")
 # MAGIC or when you set `WORKSHOP_DISABLE_MONITORING=1`. In that case the workshop still runs end-to-end on
 # MAGIC the default trace store — the **Traces tab** works, only the aggregate Overview charts stay empty.
 # MAGIC
+# MAGIC This step is **self-verifying**: after binding it emits a probe trace and polls the UC spans
+# MAGIC table to confirm writes actually route to UC, printing a loud PASS/WARN and persisting the
+# MAGIC outcome to `<schema>.uc_trace_diagnostics`. The bind error is never silently swallowed.
+# MAGIC
 # MAGIC Prereqs: a SQL warehouse the runner can use + the workspace's trace-storage preview features on.
 # MAGIC Ref: https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog
 
@@ -142,12 +146,29 @@ if not MONITORING_ENABLED:
     )
 else:
     print(f"Monitoring on — auto-resolved SQL warehouse: {MONITORING_WAREHOUSE_ID}")
+    import time
+    import traceback
     import mlflow
+    from pyspark.sql import Row, functions as F
 
     mlflow.set_tracking_uri("databricks")
 
-    # Bind the experiment to UC trace storage. A UC destination can ONLY be attached to an
-    # experiment that has zero traces — so this must happen before Module 6 logs the first trace.
+    SPANS_TABLE = f"{FULL_SCHEMA}.{TRACE_TABLE_PREFIX}_otel_spans"
+    DIAG_TABLE = f"{FULL_SCHEMA}.uc_trace_diagnostics"
+    _diag = {
+        "bind_ok": False,
+        "bind_error": "",
+        "probe_landed": False,
+        "spans_before": -1,
+        "spans_after": -1,
+        "monitoring_warehouse": MONITORING_WAREHOUSE_ID,
+    }
+
+    # --- Bind the experiment to UC trace storage --------------------------------------------
+    # A UC destination can ONLY attach to an experiment with ZERO traces, so this runs before
+    # Module 6 logs the first trace. We deliberately do NOT swallow failures: a silently swallowed
+    # bind error is exactly what leaves the Overview/Usage dashboards empty while the Traces tab
+    # still works (traces fall back to the default control-plane store).
     try:
         from mlflow.entities.trace_location import UnityCatalog
 
@@ -159,24 +180,84 @@ else:
                 table_prefix=TRACE_TABLE_PREFIX,
             ),
         )
-        print(
-            f"UC trace storage bound: experiment {_exp.experiment_id} -> "
-            f"{FULL_SCHEMA}.{TRACE_TABLE_PREFIX}_*"
-        )
+        _diag["bind_ok"] = True
+        print(f"UC trace storage bind call returned OK: experiment {_exp.experiment_id} -> {FULL_SCHEMA}.{TRACE_TABLE_PREFIX}_*")
     except Exception as exc:
-        # Most common cause on a re-run: the experiment already contains traces. A UC destination
-        # cannot be bound retroactively — reset the experiment (delete it) before re-enabling.
-        print(f"Could not bind UC trace storage (continuing on default store): {exc}")
-        mlflow.set_experiment(EXPERIMENT_PATH)
+        _diag["bind_error"] = repr(exc)
+        print("\n" + "!" * 80)
+        print("UC TRACE STORAGE BIND FAILED — traces will fall back to the DEFAULT store and the")
+        print("Overview / Usage dashboards will stay EMPTY. Full error (NOT swallowed):")
+        print("!" * 80)
+        print(traceback.format_exc())
+        print("!" * 80 + "\n")
+        mlflow.set_experiment(EXPERIMENT_PATH)  # continue on default store rather than fail the run
 
-    # Point the monitoring job at a SQL warehouse so the Overview dashboards can query UC traces.
+    # --- Point the monitoring job at the SQL warehouse --------------------------------------
     try:
         from mlflow.tracing import set_databricks_monitoring_sql_warehouse_id
 
         set_databricks_monitoring_sql_warehouse_id(sql_warehouse_id=MONITORING_WAREHOUSE_ID)
         print(f"Monitoring SQL warehouse set: {MONITORING_WAREHOUSE_ID}")
-    except Exception as exc:
-        print(f"Could not set monitoring SQL warehouse: {exc}")
+    except Exception:
+        print("Could not set monitoring SQL warehouse:\n" + traceback.format_exc())
+
+    # --- VERIFY writes actually route to UC -------------------------------------------------
+    # The bind returning OK is necessary but NOT sufficient — the real test is whether a freshly
+    # emitted trace lands in the UC OTel spans Delta table. Emit a probe span and poll the table.
+    if _diag["bind_ok"]:
+        def _spans_count():
+            try:
+                return spark.table(SPANS_TABLE).count()
+            except Exception:
+                return None
+
+        before = _spans_count()
+        _diag["spans_before"] = before if before is not None else -1
+
+        @mlflow.trace(name="uc_trace_storage_probe")
+        def _uc_trace_probe():
+            return "ok"
+
+        _uc_trace_probe()
+
+        after, _waited = before, 0
+        while _waited < 150:
+            after = _spans_count()
+            if before is not None and after is not None and after > before:
+                _diag["probe_landed"] = True
+                break
+            time.sleep(15)
+            _waited += 15
+        _diag["spans_after"] = after if after is not None else -1
+
+        if _diag["probe_landed"]:
+            print(
+                f"\n✅ UC trace WRITE verified — probe span landed in {SPANS_TABLE} "
+                f"(rows {_diag['spans_before']} -> {_diag['spans_after']}). "
+                f"Overview/Usage will populate as Modules 6+ emit traces.\n"
+            )
+        else:
+            print("\n" + "?" * 80)
+            print(f"UC bind returned OK but the probe span did NOT reach {SPANS_TABLE} within 150s.")
+            print("Either UC ingestion is lagging (re-check the table in a few minutes) OR trace")
+            print("writes are NOT routing to UC — in which case the Overview/Usage tab stays empty.")
+            print(f"spans_before={_diag['spans_before']} spans_after={_diag['spans_after']}")
+            print("?" * 80 + "\n")
+
+    # --- Persist the outcome so it's queryable after the run --------------------------------
+    # Serverless notebook-task logs aren't always retrievable via the Jobs API, so we durably
+    # record the result. Query `<schema>.uc_trace_diagnostics` to see what happened on any run.
+    try:
+        (
+            spark.createDataFrame([Row(**_diag)])
+            .withColumn("checked_at", F.current_timestamp())
+            .write.mode("overwrite")
+            .option("overwriteSchema", "true")
+            .saveAsTable(DIAG_TABLE)
+        )
+        print(f"UC trace diagnostics written to {DIAG_TABLE}: {_diag}")
+    except Exception:
+        print("Could not persist UC trace diagnostics:\n" + traceback.format_exc())
 
 # COMMAND ----------
 
