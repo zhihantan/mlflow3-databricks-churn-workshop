@@ -74,6 +74,7 @@ from config.workshop_config import (  # noqa: E402
     SNAPSHOTS_TABLE,
     EXPERIMENT_PATH,
     MONITORING_WAREHOUSE_ID,
+    MONITORING_ENABLED,
     TRACE_TABLE_PREFIX,
     SYNTHETIC_SEED,
     N_CUSTOMERS,
@@ -109,32 +110,38 @@ print(f"Using {FULL_SCHEMA}")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3b. (Optional) Enable Unity Catalog trace storage + production monitoring
+# MAGIC ## 3b. Enable Unity Catalog trace storage + production monitoring (on by default)
 # MAGIC
 # MAGIC The GenAI experiment's **Overview** dashboards (Usage / Quality / Tool calls) are powered by
 # MAGIC **Unity Catalog trace storage**, not the default control-plane trace store. To light them up,
 # MAGIC the experiment must be created **UC-backed before its first trace** — which is exactly why this
 # MAGIC runs here in Module 0, before any module logs a trace.
 # MAGIC
-# MAGIC This is **opt-in and off by default**. It only runs when `MONITORING_WAREHOUSE_ID` is set in
-# MAGIC `config/workshop_config.py` (or as an env var). When unset, the workshop runs end-to-end on the
-# MAGIC default trace store: the **Traces tab** still works, only the aggregate Overview charts stay empty.
-# MAGIC Once enabled, Module 9 §9's scheduled scorers feed the **Quality** tab and these traces feed **Usage**.
+# MAGIC This is now **on by default** — `config/workshop_config.py` auto-resolves a SQL warehouse the
+# MAGIC runner can use (a pinned `MONITORING_WAREHOUSE_ID` env var wins if set; otherwise it picks a
+# MAGIC running serverless warehouse from the workspace). No pre-configuration needed. Module 9 §9's
+# MAGIC scheduled scorers then feed the **Quality** tab and these traces feed **Usage**.
 # MAGIC
-# MAGIC Prereqs when enabled: a SQL warehouse the runner can use + the workspace's trace-storage preview
-# MAGIC features on. Ref: https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog
+# MAGIC It self-disables only when no warehouse is usable (none visible / no permission / off Databricks),
+# MAGIC or when you set `WORKSHOP_DISABLE_MONITORING=1`. In that case the workshop still runs end-to-end on
+# MAGIC the default trace store — the **Traces tab** works, only the aggregate Overview charts stay empty.
+# MAGIC
+# MAGIC Prereqs: a SQL warehouse the runner can use + the workspace's trace-storage preview features on.
+# MAGIC Ref: https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog
 
 # COMMAND ----------
 
 # Ref: https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog
-if not MONITORING_WAREHOUSE_ID:
+if not MONITORING_ENABLED:
     print(
-        "MONITORING_WAREHOUSE_ID not set — skipping UC trace storage / production monitoring.\n"
-        "The workshop runs normally on the default trace store (Traces tab works; the aggregate\n"
-        "Overview dashboards stay empty). Set MONITORING_WAREHOUSE_ID in config/workshop_config.py\n"
-        "(or as an env var) to enable them."
+        "No usable SQL warehouse resolved — running on the default trace store.\n"
+        "Monitoring is on by default but self-disables when the auto-resolver finds no warehouse\n"
+        "this principal can use (or WORKSHOP_DISABLE_MONITORING=1 is set). The workshop runs\n"
+        "normally (Traces tab works; the aggregate Overview dashboards stay empty). To force a\n"
+        "specific warehouse, set the MONITORING_WAREHOUSE_ID env var."
     )
 else:
+    print(f"Monitoring on — auto-resolved SQL warehouse: {MONITORING_WAREHOUSE_ID}")
     import mlflow
 
     mlflow.set_tracking_uri("databricks")

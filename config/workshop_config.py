@@ -124,32 +124,147 @@ AGENT_ENDPOINT: Final[str] = f"bolttech_agent_{USER_SLUG}"
 EXPERIMENT_PATH: Final[str] = f"/Users/{USER_EMAIL}/mlflow3_workshop"
 
 # ---------------------------------------------------------------------------
-# Observability — Unity Catalog trace storage + production monitoring (opt-in)
+# Observability — Unity Catalog trace storage + production monitoring (ON by default)
 # ---------------------------------------------------------------------------
 #
 # The GenAI experiment's Overview dashboards (Usage / Quality / Tool calls) are powered
 # by **Unity Catalog trace storage**, NOT the default control-plane trace store. To light
 # them up, the experiment must be created UC-backed BEFORE its first trace (Module 0 does
-# this) and a SQL warehouse must be configured for the monitoring queries.
+# this) and a SQL warehouse must be available for the monitoring queries.
 #
-# This is OPT-IN and OFF by default. Set MONITORING_WAREHOUSE_ID (via the `MONITORING_WAREHOUSE_ID`
-# env var, or edit the default below) to a SQL warehouse ID to enable UC trace storage +
-# the production-monitoring dashboard. Leave it empty to run the workshop anywhere with the
-# default trace store — the Traces tab still works; only the aggregate Overview charts need
-# UC storage.
+# This is now ON by default — no pre-configuration required. At import we resolve a SQL
+# warehouse the current principal can actually USE and wire it through, so every module's
+# traces land in UC Delta tables and the production-monitoring dashboards populate automatically.
 #
-# Prerequisites when enabled: MLflow 3.11+, a UC-enabled workspace, a SQL warehouse the
+# Warehouse resolution order (first hit wins):
+#   1. MONITORING_WAREHOUSE_ID env var — pin a specific warehouse (highest priority, trusted).
+#   2. Auto-discovery via the Databricks SDK — rank visible warehouses (running-serverless →
+#      running → serverless → anything) and return the first the caller CAN USE.
+#
+# "CAN USE" vs "can see": `warehouses.list()` returns warehouses the caller can *see*, which
+# isn't the same as being able to run queries on them. We confirm USE by running `SELECT 1`
+# (the only reliable signal — reading the permission ACL needs CAN_MANAGE, which a CAN_USE-only
+# participant lacks). Set WORKSHOP_VERIFY_WAREHOUSE_USE=0 to skip the probe (visibility-only,
+# faster). To avoid surprise cost, only running or serverless warehouses are probed; a stopped
+# classic warehouse is never auto-started just to verify unless WORKSHOP_VERIFY_START_WAREHOUSE=1.
+#
+# Escape hatch: set WORKSHOP_DISABLE_MONITORING=1 to force the default control-plane trace
+# store (the Traces tab still works; only the aggregate Overview charts need UC storage).
+# Auto-discovery is import-safe — off Databricks, with no SDK, no visible warehouses, or
+# none usable, it degrades to "" and the workshop runs on the default store.
+#
+# Prerequisites for the dashboards: MLflow 3.11+, a UC-enabled workspace, a SQL warehouse the
 # runner can use, and the workspace's trace-storage preview features turned on.
 # Ref: https://docs.databricks.com/aws/en/mlflow3/genai/tracing/trace-unity-catalog
-MONITORING_WAREHOUSE_ID: Final[str] = os.environ.get("MONITORING_WAREHOUSE_ID", "")
 TRACE_TABLE_PREFIX: Final[str] = "mlflow_traces"  # UC Delta table prefix for OTel traces
 
-# When UC trace storage is enabled, MLflow needs a SQL warehouse to read/write traces in the
-# UC Delta tables from *any* notebook/job session (separate from the monitoring-job warehouse
-# configured in Module 0 via set_databricks_monitoring_sql_warehouse_id). It looks for this
-# env var. Surfacing it here means every module that imports this config can access UC traces
-# (otherwise the first trace in Module 6 fails with "SQL warehouse ID is required for
-# accessing traces in UC tables").
+_MONITORING_DISABLED: Final[bool] = (
+    os.environ.get("WORKSHOP_DISABLE_MONITORING", "").strip().lower() in ("1", "true", "yes")
+)
+# CAN-USE verification is ON by default: confirm the resolved warehouse is one the current
+# principal can actually USE, not merely see. Set WORKSHOP_VERIFY_WAREHOUSE_USE=0 to fall back
+# to visibility-only selection (faster, but may pick a warehouse the user can view but not run).
+_VERIFY_WAREHOUSE_USE: Final[bool] = (
+    os.environ.get("WORKSHOP_VERIFY_WAREHOUSE_USE", "1").strip().lower() not in ("0", "false", "no")
+)
+
+
+def _warehouse_state(w) -> str:
+    return getattr(getattr(w, "state", None), "value", "") or ""
+
+
+def _is_serverless(w) -> bool:
+    return bool(getattr(w, "enable_serverless_compute", False))
+
+
+def _can_use_warehouse(client, warehouse_id: str) -> bool:
+    """Authoritatively confirm the caller CAN USE a warehouse by running `SELECT 1` on it.
+
+    Why a probe and not the permission ACL: reading a warehouse's permissions
+    (`warehouses.get_permissions`) requires CAN_MANAGE, so a participant who holds only CAN_USE
+    can't read it — the ACL path would wrongly exclude exactly the warehouses they can use.
+    Running a trivial statement is the only reliable signal. A short wait_timeout keeps it
+    sub-second on a running warehouse; a permission failure surfaces as a raised error (or a
+    FAILED status whose message names permissions), which we treat as "not usable". Any other
+    outcome means the statement was accepted → CAN USE.
+    """
+    try:
+        from databricks.sdk.service.sql import StatementState
+
+        resp = client.statement_execution.execute_statement(
+            warehouse_id=warehouse_id, statement="SELECT 1", wait_timeout="5s",
+        )
+        status = getattr(resp, "status", None)
+        state = getattr(status, "state", None)
+        if state == StatementState.FAILED:
+            err = getattr(status, "error", None)
+            msg = (getattr(err, "message", "") or "").lower()
+            return not any(k in msg for k in ("permission", "not authorized", "access denied", "forbidden"))
+        return True  # PENDING / RUNNING / SUCCEEDED / CANCELED → accepted, so CAN USE
+    except Exception:
+        return False
+
+
+def _resolve_monitoring_warehouse_id() -> str:
+    """Return a SQL warehouse ID the current principal CAN USE, or "" if none is usable.
+
+    Resolution: explicit ``MONITORING_WAREHOUSE_ID`` env override first (trusted, not probed),
+    otherwise auto-discover via the Databricks SDK. Visible warehouses are ranked
+    running-serverless → running → serverless → anything, then (when WORKSHOP_VERIFY_WAREHOUSE_USE
+    is on) each is probed with `SELECT 1` and the first the caller CAN USE is returned. To avoid
+    surprise cost at import, only running or serverless warehouses are probed — a stopped classic
+    warehouse is never auto-started to verify unless WORKSHOP_VERIFY_START_WAREHOUSE=1.
+
+    Import-safe by design — any failure (monitoring disabled, no SDK, off Databricks, no
+    warehouses visible, or none usable) returns "" instead of raising, so importing this module
+    never crashes and the workshop falls back to the default trace store.
+    """
+    if _MONITORING_DISABLED:
+        return ""
+    pinned = os.environ.get("MONITORING_WAREHOUSE_ID", "").strip()
+    if pinned:
+        return pinned  # explicit choice — trust it, don't probe
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        client = WorkspaceClient()
+        # warehouses.list() returns warehouses visible to the caller — the candidate set. Rank
+        # to prefer no-cold-start, no-cost options first so the probe (and monitoring) is cheap.
+        warehouses = list(client.warehouses.list())
+        if not warehouses:
+            return ""
+        warehouses.sort(key=lambda w: (
+            not (_warehouse_state(w) == "RUNNING" and _is_serverless(w)),
+            _warehouse_state(w) != "RUNNING",
+            not _is_serverless(w),
+        ))
+
+        if not _VERIFY_WAREHOUSE_USE:
+            return warehouses[0].id  # visibility-only (skip the CAN-USE probe)
+
+        allow_start = (
+            os.environ.get("WORKSHOP_VERIFY_START_WAREHOUSE", "").strip().lower() in ("1", "true", "yes")
+        )
+        for w in warehouses:
+            # Probe only when it won't trigger surprise cost: already running, serverless (cheap,
+            # fast cold start), or the user explicitly opted into starting warehouses to verify.
+            if _warehouse_state(w) == "RUNNING" or _is_serverless(w) or allow_start:
+                if _can_use_warehouse(client, w.id):
+                    return w.id
+        return ""  # nothing the caller can USE → monitoring self-disables cleanly
+    except Exception:
+        return ""
+
+
+# Resolved once at import so every module that imports this config inherits the same warehouse.
+MONITORING_WAREHOUSE_ID: Final[str] = _resolve_monitoring_warehouse_id()
+MONITORING_ENABLED: Final[bool] = bool(MONITORING_WAREHOUSE_ID)
+
+# MLflow needs a SQL warehouse to read/write traces in the UC Delta tables from *any*
+# notebook/job session (separate from the monitoring-job warehouse Module 0 sets via
+# set_databricks_monitoring_sql_warehouse_id). Surfacing it here means every module that
+# imports this config can access UC traces (otherwise the first trace in Module 6 fails with
+# "SQL warehouse ID is required for accessing traces in UC tables").
 if MONITORING_WAREHOUSE_ID:
     os.environ.setdefault("MLFLOW_TRACING_SQL_WAREHOUSE_ID", MONITORING_WAREHOUSE_ID)
 
@@ -183,7 +298,8 @@ def print_config() -> None:
         "CHAT_MODEL": CHAT_MODEL,
         "EMBEDDING_MODEL": EMBEDDING_MODEL,
         "EXPERIMENT_PATH": EXPERIMENT_PATH,
-        "MONITORING_WAREHOUSE_ID": MONITORING_WAREHOUSE_ID or "(unset — UC trace monitoring off)",
+        "MONITORING_WAREHOUSE_ID": MONITORING_WAREHOUSE_ID or "(none usable — UC trace monitoring off)",
+        "MONITORING_ENABLED": MONITORING_ENABLED,
         "SUMMARY_PROMPT_NAME": SUMMARY_PROMPT_NAME,
         "RAG_PROMPT_NAME": RAG_PROMPT_NAME,
         "EMAIL_PROMPT_NAME": EMAIL_PROMPT_NAME,
